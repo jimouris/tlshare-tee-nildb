@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature, decode_dss_signature
@@ -120,9 +121,11 @@ class KeyManager:
             )
             logger.info("Signature verification successful")
             return True
-        except (ValueError, TypeError) as exc:
-            logger.error("Signature verification failed: %s", str(exc))
+        except InvalidSignature:
+            logger.error("Signature verification failed - invalid signature")
             return False
+        except Exception as exc:
+            raise RuntimeError(f"Signature verification failed: {str(exc)}") from exc
 
     def fetch_remote_public_key(self, remote_url: str) -> Optional[ec.EllipticCurvePublicKey]:
         """Fetch the remote public key from a URL.

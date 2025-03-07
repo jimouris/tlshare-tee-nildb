@@ -31,7 +31,7 @@ def encrypt_message(message: str, key: bytes) -> bytes:
     # Prepend the nonce to the ciphertext
     return nonce + ciphertext
 
-def main() -> None:
+def main(message: str, sensitive_blocks: list[int]) -> None:
     """Main function to demonstrate secure message sending."""
     # Initialize key manager
     key_manager = KeyManager()
@@ -47,8 +47,6 @@ def main() -> None:
     # Generate a random AES key
     aes_key = generate_key()
 
-    # Create a larger message (at least 64 bytes)
-    message = "This is a sensitive message that contains important data. " * 2
     logger.info("Original message length: %d bytes", len(message))
     logger.info("Original message: %s", message)
 
@@ -56,8 +54,8 @@ def main() -> None:
     ciphertext = encrypt_message(message, aes_key)
     logger.info("Ciphertext length (including nonce): %d bytes", len(ciphertext))
 
-    # Sign the ciphertext and key
-    data_to_sign = ciphertext + aes_key
+    # Sign the ciphertext
+    data_to_sign = ciphertext
     signature = key_manager.sign_data(data_to_sign)
 
     # Prepare the request payload
@@ -65,7 +63,7 @@ def main() -> None:
         "aes_ciphertext": base64.b64encode(ciphertext).decode(),
         "aes_key": base64.b64encode(aes_key).decode(),
         "ecdsa_signature": base64.b64encode(signature).decode(),
-        "sensitive_blocks_indices": [1, 3]
+        "sensitive_blocks_indices": sensitive_blocks,
     }
 
     # Send the request to the server
@@ -83,4 +81,42 @@ def main() -> None:
         logger.error(response.text)
 
 if __name__ == "__main__":
-    main()
+    HTTPS_EXAMPLE = """
+    HTTP/2 200 OK
+    Content-Type: application/json
+    Content-Length: 256
+    Server: Server
+    Date: Fri, 07 Mar 2025 12:34:56 GMT
+    Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+    Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://amazon.com
+    X-Frame-Options: DENY
+    X-Content-Type-Options: nosniff
+    X-XSS-Protection: 1; mode=block
+    Set-Cookie: session-id=145-9876543-1234567; Path=/; Secure; HttpOnly; SameSite=Strict
+    Set-Cookie: session-token=xyz123abc456def789ghi000; Path=/; Secure; HttpOnly; SameSite=Strict
+
+    {
+      "orderId": "112-3456789-0123456",
+      "status": "Confirmed",
+      "orderDate": "2025-03-07T12:34:56Z",
+      "totalAmount": {
+        "currency": "USD",
+        "value": "129.99"
+      },
+      "shipping": {
+        "method": "Standard Shipping",
+        "estimatedDelivery": "2025-03-10T18:00:00Z",
+        "address": {
+          "recipient": "John Doe",
+          "line1": "1234 Elm Street",
+          "line2": "Apt 567",
+          "city": "Seattle",
+          "state": "WA",
+          "postalCode": "98101",
+          "country": "US"
+        }
+      }
+    }
+    """
+    sensitive_blocks = [51, 62, 64, 65, 67, 68, 70, 72]
+    main(HTTPS_EXAMPLE, sensitive_blocks)

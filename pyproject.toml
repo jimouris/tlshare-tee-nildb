@@ -7,13 +7,14 @@ description = """\
     """
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.109.0",
     "uvicorn>=0.27.0",
     "pydantic>=2.6.0",
-    "cryptography>=42.0.0",
-    "requests>=2.31.0"
+    "cryptography>=3.4",
+    "requests>=2.31.0",
+    "secretvaults==0.0.0a6",
 ]
 
 [project.urls]
@@ -28,7 +29,9 @@ docs = [
 ]
 test = [
     "pytest~=8.2",
-    "pytest-cov~=5.0"
+    "pytest-cov~=5.0",
+    "pytest-asyncio~=0.23.5",
+    "httpx~=0.26.0"
 ]
 lint = [
     "pylint~=3.2.0"
@@ -44,6 +47,8 @@ dev = [
     "pylint~=3.2.0",
     "pytest~=8.2",
     "pytest-cov~=5.0",
+    "pytest-asyncio~=0.23.5",
+    "httpx~=0.26.0",
     "toml~=0.10.2",
     "sphinx~=5.0",
     "sphinx-rtd-theme~=2.0.0",

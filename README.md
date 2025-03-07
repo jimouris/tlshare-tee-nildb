@@ -32,6 +32,30 @@ uv pip install -e ".[dev]"  # For all development tools
 
 ## Development
 
+### Testing
+
+The project uses `pytest` for testing. First, make sure you have installed the package in development mode:
+
+```bash
+# Install test dependencies and the package in development mode
+uv pip install -e ".[test]"
+```
+
+Then you can run the tests:
+
+```bash
+# Run tests with coverage report
+pytest
+
+# Run a specific test file
+pytest tests/test_message_processing.py
+```
+
+The test suite includes:
+- Unit tests for message processing
+- Integration tests for the FastAPI server
+- Tests for key management and encryption
+
 ### Linting
 
 The project uses `pylint` for code linting. To run the linter:
@@ -41,12 +65,17 @@ uv pip install -e ".[lint]"
 pylint src/
 ```
 
-### Running the Server
-
-To run the FastAPI server:
-
+### Setup nilDB
+After you get your nilDB credentials, copy `.env.sample` to `.env` and store your credentials.
+Then, set up a new nilDB schema and query by running:
 ```bash
-python src/main.py
+python -m src.nildb_operations
+```
+
+### Running the Server
+To run the FastAPI server:
+```bash
+python -m src.server
 ```
 
 The server will start on `http://0.0.0.0:8000`. You can:
@@ -60,7 +89,7 @@ The server will start on `http://0.0.0.0:8000`. You can:
 To test the encryption and decryption flow, run the client in a separate terminal:
 
 ```bash
-python src/client.py
+python -m src.client
 ```
 
 The client will:

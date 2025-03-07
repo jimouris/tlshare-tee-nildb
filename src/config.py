@@ -1,8 +1,8 @@
 """Configuration management for the TEE server."""
 
-import json
 from pathlib import Path
 from typing import Dict, Any, Optional
+import json
 
 from src.logging_config import logger
 

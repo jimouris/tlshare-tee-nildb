@@ -1,0 +1,26 @@
+{
+    "variables": {},
+    "pipeline": [
+        {
+            "$group": {
+                "_id": null,
+                "total_purchases": { "$sum": "$purchase.%share" },
+                "count": { "$sum": 1 }
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "sum_purchase": {
+                "%share": {
+                    "$mod": [
+                        "$total_purchases",
+                        { "$add": [{ "$pow": [2, 32] }, 15] }
+                    ]
+                }
+                },
+                "user_count": "$count"
+            }
+        }
+    ]
+}
