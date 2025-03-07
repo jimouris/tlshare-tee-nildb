@@ -1,0 +1,7 @@
+{
+    "remote_server": {
+        "ip": "192.168.1.100",
+        "port": 8000,
+        "public_key_endpoint": "/public-key"
+    }
+}

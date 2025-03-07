@@ -1,0 +1,86 @@
+"""Client for sending secure messages to the TEE server."""
+
+import os
+import base64
+import requests
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from src.key_management import KeyManager
+from src.logging_config import logger
+
+def generate_key() -> bytes:
+    """Generate a random AES key.
+
+    Returns:
+        bytes: A 256-bit AES key
+    """
+    return AESGCM.generate_key(bit_length=256)
+
+def encrypt_message(message: str, key: bytes) -> bytes:
+    """Encrypt a message using AES-GCM.
+
+    Args:
+        message: The message to encrypt
+        key: The AES key to use for encryption
+
+    Returns:
+        bytes: The encrypted message with nonce prepended
+    """
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, message.encode(), None)
+    # Prepend the nonce to the ciphertext
+    return nonce + ciphertext
+
+def main() -> None:
+    """Main function to demonstrate secure message sending."""
+    # Initialize key manager
+    key_manager = KeyManager()
+
+    try:
+        # Verify private key exists
+        key_manager.load_private_key()
+        logger.info("Private key loaded successfully")
+    except FileNotFoundError as exc:
+        logger.error("Private key not found. Please generate keys first.")
+        raise RuntimeError("Private key not found. Please generate keys first.") from exc
+
+    # Generate a random AES key
+    aes_key = generate_key()
+
+    # Create a larger message (at least 64 bytes)
+    message = "This is a sensitive message that contains important data. " * 2
+    logger.info("Original message length: %d bytes", len(message))
+    logger.info("Original message: %s", message)
+
+    # Encrypt the message
+    ciphertext = encrypt_message(message, aes_key)
+    logger.info("Ciphertext length (including nonce): %d bytes", len(ciphertext))
+
+    # Sign the ciphertext and key
+    data_to_sign = ciphertext + aes_key
+    signature = key_manager.sign_data(data_to_sign)
+
+    # Prepare the request payload
+    payload = {
+        "aes_ciphertext": base64.b64encode(ciphertext).decode(),
+        "aes_key": base64.b64encode(aes_key).decode(),
+        "ecdsa_signature": base64.b64encode(signature).decode(),
+        "sensitive_blocks_indices": [1, 3]
+    }
+
+    # Send the request to the server
+    response = requests.post(
+        "http://localhost:8000/process-secure-message",
+        json=payload,
+        timeout=30  # 30 second timeout
+    )
+
+    if response.status_code == 200:
+        result = response.json()
+        logger.info("Server response: %s", result)
+    else:
+        logger.error("Error: %d", response.status_code)
+        logger.error(response.text)
+
+if __name__ == "__main__":
+    main()
