@@ -15,7 +15,7 @@ from .logging import logger
 class KeyManager:
     """Manages cryptographic keys and signatures for secure communication."""
 
-    def __init__(self, key_dir: str = "keys", config_path: str = "config.json"):
+    def __init__(self, key_dir: str = "keys", config_path: str = "src/config/config.json"):
         """Initialize the key manager.
 
         Args:

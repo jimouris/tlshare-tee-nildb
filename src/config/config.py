@@ -9,7 +9,7 @@ from src.config.logging import logger
 class Config:
     """Configuration class for managing server settings."""
 
-    def __init__(self, config_path: str = "config.json"):
+    def __init__(self, config_path: str = "src/config/config.json"):
         """Initialize the configuration.
 
         Args:

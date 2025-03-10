@@ -1,0 +1,10 @@
+(ssl_config) {
+	tls {
+		protocols tls1.2 tls1.3
+	}
+ }
+
+ https://tlshare.sandbox.nilogy.xyz {
+	import ssl_config
+	reverse_proxy api:8443
+ }
