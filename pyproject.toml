@@ -15,6 +15,7 @@ dependencies = [
     "cryptography>=3.4",
     "requests>=2.31.0",
     "secretvaults==0.0.0a6",
+    "gunicorn>=23.0.0",
 ]
 
 [project.urls]
