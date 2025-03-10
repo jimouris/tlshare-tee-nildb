@@ -9,4 +9,4 @@ uv sync
 
 EXPOSE 8080 8443
 
-CMD uv run gunicorn -c gunicorn.conf.py server.server
+CMD uv run gunicorn -c gunicorn.conf.py src.server.server:app
