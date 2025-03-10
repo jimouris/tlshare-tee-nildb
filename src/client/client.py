@@ -118,5 +118,5 @@ if __name__ == "__main__":
       }
     }
     """
-    sensitive_blocks = [51, 62, 64, 65, 67, 68, 70, 72]
-    main(HTTPS_EXAMPLE, sensitive_blocks)
+    sensitive_blocks_example = [51, 62, 64, 65, 67, 68, 70, 72]
+    main(HTTPS_EXAMPLE, sensitive_blocks_example)

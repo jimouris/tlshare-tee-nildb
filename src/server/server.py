@@ -1,6 +1,5 @@
 """FastAPI server that processes secure messages with AES encryption and ECDSA signatures."""
 
-import asyncio
 import contextlib
 import datetime
 import re
@@ -11,8 +10,8 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, Response
-from src.nildb.nildb_operations import upload_amazon_purchase
 from pydantic import BaseModel, Field, field_validator
+from src.nildb.nildb_operations import upload_amazon_purchase
 
 from src.config.key_management import KeyManager
 from src.config.logging import logger
@@ -159,6 +158,7 @@ def extract_message_parts(plaintext: bytes, sensitive_indices: List[int], block_
     return sensitive_data, non_sensitive_data
 
 def extract_number(text: str):
+    """Extract a number as an integer from a string."""
     numbers = [
         int(float(num))
         for num in re.findall(r'\d+\.\d+|\d+', text)

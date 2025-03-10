@@ -1,5 +1,4 @@
-"""Schema Create example using the SecretVault wrapper"""
-"""Data Create and Read example using the SecretVault wrapper"""
+"""Schema Create, upload data and execute query example using the SecretVault wrapper"""
 
 import asyncio
 import json
