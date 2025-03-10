@@ -25,7 +25,7 @@ class KeyManager:
         self.key_dir.mkdir(exist_ok=True)
         self.private_key_path = self.key_dir / "private_key.pem"
         self.public_key_path = self.key_dir / "public_key.pem"
-        self.remote_public_key_path = self.key_dir / "remote_public_key.pem"
+        self.remote_public_key_path = self.key_dir / "public_key.pem"
         self.config = Config(config_path)
 
     def generate_keys(self) -> None:

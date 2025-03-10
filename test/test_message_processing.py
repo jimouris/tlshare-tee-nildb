@@ -3,8 +3,8 @@
 import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from src.key_management import KeyManager
-from src.server import extract_message_parts, BLOCK_SIZE
+from src.config.key_management import KeyManager
+from src.server.server import extract_message_parts, BLOCK_SIZE, extract_number
 
 def test_extract_message_parts():
     """Test extracting sensitive and non-sensitive parts of a message."""
@@ -85,10 +85,12 @@ def test_secure_message_processing(key_manager: KeyManager, sample_message: str,
         sample_sensitive_indices,
         BLOCK_SIZE
     )
+    extracted_number = extract_number(sensitive_part.decode('utf-8'))
 
     # Verify sensitive parts
     assert len(sensitive_part) == BLOCK_SIZE * len(sample_sensitive_indices)
     assert len(non_sensitive_part) == len(decrypted) - len(sensitive_part)
+    assert extracted_number == 100
 
 def test_invalid_signature(key_manager: KeyManager, sample_message: str):
     """Test handling of invalid signatures."""

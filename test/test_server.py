@@ -6,15 +6,15 @@ from fastapi.testclient import TestClient
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import os
 
-from src.server import app
-from src.key_management import KeyManager
+from src.config.key_management import KeyManager
+from src.server.server import app
 
 @pytest.fixture
 def client(key_manager: KeyManager) -> TestClient:
     """Create a test client with the FastAPI app."""
     # Override the global key manager with the test key manager
-    import src.server
-    src.main.key_manager = key_manager
+    import src.server.server
+    src.server.server.key_manager = key_manager
     return TestClient(app)
 
 def test_root_endpoint(client: TestClient):
@@ -56,7 +56,8 @@ def test_process_secure_message(client: TestClient, key_manager: KeyManager, sam
         "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
         "aes_key": base64.b64encode(aes_key).decode(),
         "ecdsa_signature": base64.b64encode(signature).decode(),
-        "sensitive_blocks_indices": sample_sensitive_indices
+        "sensitive_blocks_indices": sample_sensitive_indices,
+        "is_test": True
     }
 
     # Send the request

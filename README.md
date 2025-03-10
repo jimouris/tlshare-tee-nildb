@@ -44,11 +44,7 @@ uv pip install -e ".[test]"
 Then you can run the tests:
 
 ```bash
-# Run tests with coverage report
-pytest
-
-# Run a specific test file
-pytest tests/test_message_processing.py
+python -m pytest
 ```
 
 The test suite includes:

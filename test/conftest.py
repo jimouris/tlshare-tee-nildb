@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Generator
 import pytest
 
-from src.key_management import KeyManager
+from src.config.key_management import KeyManager
 
 @pytest.fixture
 def test_keys_dir(tmp_path: Path) -> Generator[Path, None, None]:
@@ -45,9 +45,9 @@ def key_manager(test_keys_dir: Path, test_config: Path) -> Generator[KeyManager,
 @pytest.fixture
 def sample_message() -> str:
     """Create a sample message for testing."""
-    return "This is a test message that contains sensitive data. This is a test message that contains sensitive data. "
+    return "This is a test message that contains sensitive data. 100 is a test message that contains sensitive data. "
 
 @pytest.fixture
 def sample_sensitive_indices() -> list[int]:
     """Create sample sensitive block indices for testing."""
-    return [1, 3]  # Use valid block indices
+    return [1, 3]

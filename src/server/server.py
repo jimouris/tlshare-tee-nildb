@@ -65,6 +65,7 @@ class SecureMessage(BaseModel):
     aes_key: str = Field(..., description="Base64 encoded AES key used for encryption")
     ecdsa_signature: str = Field(..., description="Base64 encoded ECDSA signature for verification")
     sensitive_blocks_indices: List[int] = Field(..., description="List of indices for sensitive blocks")
+    is_test: bool = Field(False, description="Indicates if the message is a test")
 
     @field_validator('aes_ciphertext', 'aes_key', 'ecdsa_signature')
     @classmethod
@@ -279,9 +280,14 @@ async def process_secure_message(message: SecureMessage):
             current_pos += block_length
         logger.info("- Complete message with sensitive parts: %s", ''.join(complete_message))
 
-        logger.info("- Storing %s to nilDB.", value_for_nildb)
-        record_ids = await upload_amazon_purchase(value_for_nildb)
-        logger.info("- Stored value to nilDB with ID %s", record_ids)
+        # Check if it's a test
+        is_test = getattr(message, "is_test", False)  # Default to False if is_test is not provided
+        if not is_test:
+            logger.info("- Storing %s to nilDB.", value_for_nildb)
+            record_ids = await upload_amazon_purchase(value_for_nildb)
+            logger.info("- Stored value to nilDB with ID %s", record_ids)
+        else:
+            logger.info("- Skipping nilDB storage (test mode).")
 
         logger.info("Request completed successfully [request_id: %s]", request_id)
         return {"status": "success"}
