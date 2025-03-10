@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import json
 
-from src.logging_config import logger
+from src.config.logging import logger
 
 class Config:
     """Configuration class for managing server settings."""

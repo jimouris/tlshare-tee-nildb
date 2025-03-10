@@ -69,13 +69,13 @@ pylint src/
 After you get your nilDB credentials, copy `.env.sample` to `.env` and store your credentials.
 Then, set up a new nilDB schema and query by running:
 ```bash
-python -m src.nildb_operations
+python -m src.nildb.nildb_operations
 ```
 
 ### Running the Server
 To run the FastAPI server:
 ```bash
-python -m src.server
+python -m src.server.server
 ```
 
 The server will start on `http://0.0.0.0:8000`. You can:
@@ -89,7 +89,7 @@ The server will start on `http://0.0.0.0:8000`. You can:
 To test the encryption and decryption flow, run the client in a separate terminal:
 
 ```bash
-python -m src.client
+python -m src.client.client
 ```
 
 The client will:

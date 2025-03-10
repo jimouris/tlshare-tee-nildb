@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature, decode_dss_signature
 from cryptography.hazmat.primitives.hashes import SHA256
 from .config import Config
-from .logging_config import logger
+from .logging import logger
 
 class KeyManager:
     """Manages cryptographic keys and signatures for secure communication."""

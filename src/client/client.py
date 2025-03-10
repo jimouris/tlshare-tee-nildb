@@ -4,8 +4,8 @@ import os
 import base64
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from src.key_management import KeyManager
-from src.logging_config import logger
+from src.config.key_management import KeyManager
+from src.config.logging import logger
 
 def generate_key() -> bytes:
     """Generate a random AES key.

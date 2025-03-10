@@ -11,11 +11,11 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, Response
-from nildb_operations import upload_amazon_purchase
+from src.nildb.nildb_operations import upload_amazon_purchase
 from pydantic import BaseModel, Field, field_validator
 
-from src.key_management import KeyManager
-from src.logging_config import logger
+from src.config.key_management import KeyManager
+from src.config.logging import logger
 
 # Initialize key manager
 key_manager = KeyManager()

@@ -6,7 +6,7 @@ import json
 import sys
 import os
 from secretvaults import SecretVaultWrapper, OperationType
-from org_config import org_config
+from src.nildb.org_config import org_config
 
 SCHEMA_ID = os.getenv("SCHEMA_ID")
 QUERY_ID = os.getenv("QUERY_ID")
