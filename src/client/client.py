@@ -31,8 +31,14 @@ def encrypt_message(message: str, key: bytes) -> bytes:
     # Prepend the nonce to the ciphertext
     return nonce + ciphertext
 
-def main(message: str, sensitive_blocks: list[int]) -> None:
-    """Main function to demonstrate secure message sending."""
+def main(message: str, sensitive_blocks: list[int], server_url: str = "http://localhost:8000") -> None:
+    """Main function to demonstrate secure message sending.
+
+    Args:
+        message: The message to send.
+        sensitive_blocks: List of indices for sensitive blocks.
+        server_url: The URL of the server (default: http://localhost:8000).
+    """
     # Initialize key manager
     key_manager = KeyManager()
 
@@ -68,7 +74,7 @@ def main(message: str, sensitive_blocks: list[int]) -> None:
 
     # Send the request to the server
     response = requests.post(
-        "http://localhost:8000/process-secure-message",
+        f"{server_url}/process-secure-message",
         json=payload,
         timeout=30  # 30 second timeout
     )
@@ -81,6 +87,13 @@ def main(message: str, sensitive_blocks: list[int]) -> None:
         logger.error(response.text)
 
 if __name__ == "__main__":
+    import sys
+    # Parse command-line arguments
+    if len(sys.argv) < 2:
+        url = "http://localhost:8000"
+    else:
+        url = sys.argv[1]
+
     HTTPS_EXAMPLE = """
     HTTP/2 200 OK
     Content-Type: application/json
@@ -119,4 +132,4 @@ if __name__ == "__main__":
     }
     """
     sensitive_blocks_example = [51, 62, 64, 65, 67, 68, 70, 72]
-    main(HTTPS_EXAMPLE, sensitive_blocks_example)
+    main(HTTPS_EXAMPLE, sensitive_blocks_example, url)

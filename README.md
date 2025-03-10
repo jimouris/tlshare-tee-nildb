@@ -82,14 +82,24 @@ The server will start on `http://0.0.0.0:8000`. You can:
 
 ### Running the Client
 
-To test the encryption and decryption flow, run the client in a separate terminal:
+To run the client, use the following command:
 
 ```bash
-python -m src.client.client
+python src/client/client.py [SERVER_URL]
 ```
 
-The client will:
-1. Generate a random AES key
-2. Encrypt a sample message
-3. Send the encrypted message and key to the server
-4. Display the server's response with the decrypted message
+- **`SERVER_URL`**: (Optional) The URL of the server. If not provided, the client defaults to `http://localhost:8000`.
+
+### Example Usage
+
+1. **Default (localhost)**:
+   ```bash
+   python src/client/client.py
+   ```
+
+2. **Custom Server URL**:
+   ```bash
+   python src/client/client.py http://example.com:8000
+   ```
+
+The client will send a secure message to the specified server URL.
