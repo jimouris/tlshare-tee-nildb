@@ -33,7 +33,13 @@ def test_public_key_endpoint(client: TestClient, key_manager: KeyManager):
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/x-pem-file"
 
-def test_process_secure_message(client: TestClient, key_manager: KeyManager, sample_message: str, sample_sensitive_indices: list[int]):
+def test_process_secure_message(
+    client: TestClient,
+    key_manager: KeyManager,
+    sample_message: str,
+    sample_blocks_to_redact: list[int],
+    sample_blocks_to_extract: list[int],
+):
     """Test processing a secure message."""
     # Generate keys
     key_manager.generate_keys()
@@ -56,7 +62,8 @@ def test_process_secure_message(client: TestClient, key_manager: KeyManager, sam
         "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
         "aes_key": base64.b64encode(aes_key).decode(),
         "ecdsa_signature": base64.b64encode(signature).decode(),
-        "sensitive_blocks_indices": sample_sensitive_indices,
+        "blocks_to_redact": sample_blocks_to_redact,
+        "blocks_to_extract": sample_blocks_to_extract,
         "is_test": True
     }
 
@@ -87,7 +94,8 @@ def test_invalid_signature(client: TestClient, key_manager: KeyManager, sample_m
         "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
         "aes_key": base64.b64encode(aes_key).decode(),
         "ecdsa_signature": base64.b64encode(invalid_signature).decode(),
-        "sensitive_blocks_indices": [1, 3]
+        "blocks_to_redact": [1, 3],
+        "blocks_to_extract": [1],
     }
 
     # Send the request
@@ -118,7 +126,8 @@ def test_invalid_block_indices(client: TestClient, key_manager: KeyManager, samp
         "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
         "aes_key": base64.b64encode(aes_key).decode(),
         "ecdsa_signature": base64.b64encode(signature).decode(),
-        "sensitive_blocks_indices": [100]  # Invalid index
+        "blocks_to_redact": [100],  # Invalid index
+        "blocks_to_extract": [],
     }
 
     # Send the request

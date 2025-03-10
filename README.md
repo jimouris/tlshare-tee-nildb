@@ -6,7 +6,7 @@ Server (running on a TEE) that accepts requests from a client of a zkTLS connect
     "aes_ciphertext": "base64_encoded_bytes",
     "aes_key": "base64_encoded_bytes",
     "ecdsa_signature": "base64_encoded_bytes",
-    "sensitive_blocks_indices": [1, 2, 3]
+    "blocks_to_redact": [1, 2, 3]
 }
 ```
 

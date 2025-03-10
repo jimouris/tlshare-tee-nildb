@@ -48,6 +48,11 @@ def sample_message() -> str:
     return "This is a test message that contains sensitive data. 100 is a test message that contains sensitive data. "
 
 @pytest.fixture
-def sample_sensitive_indices() -> list[int]:
+def sample_blocks_to_redact() -> list[int]:
     """Create sample sensitive block indices for testing."""
     return [1, 3]
+
+@pytest.fixture
+def sample_blocks_to_extract() -> list[int]:
+    """Create sample extract block indices for testing."""
+    return [3]  # Default to extracting data from block 1

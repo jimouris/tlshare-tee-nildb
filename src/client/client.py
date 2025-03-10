@@ -31,12 +31,18 @@ def encrypt_message(message: str, key: bytes) -> bytes:
     # Prepend the nonce to the ciphertext
     return nonce + ciphertext
 
-def main(message: str, sensitive_blocks: list[int], server_url: str = "http://localhost:8000") -> None:
+def main(
+        message: str,
+        blocks_to_redact: list[int],
+        blocks_to_extract: list[int],
+        server_url: str = "http://localhost:8000"
+    ) -> None:
     """Main function to demonstrate secure message sending.
 
     Args:
         message: The message to send.
-        sensitive_blocks: List of indices for sensitive blocks.
+        blocks_to_redact: List of indices for sensitive blocks.
+        blocks_to_extract: List of block indices to extract data from (subset of blocks_to_redact).
         server_url: The URL of the server (default: http://localhost:8000).
     """
     # Initialize key manager
@@ -69,7 +75,8 @@ def main(message: str, sensitive_blocks: list[int], server_url: str = "http://lo
         "aes_ciphertext": base64.b64encode(ciphertext).decode(),
         "aes_key": base64.b64encode(aes_key).decode(),
         "ecdsa_signature": base64.b64encode(signature).decode(),
-        "sensitive_blocks_indices": sensitive_blocks,
+        "blocks_to_redact": blocks_to_redact,
+        "blocks_to_extract": blocks_to_extract,
     }
 
     # Send the request to the server
@@ -131,5 +138,6 @@ if __name__ == "__main__":
       }
     }
     """
-    sensitive_blocks_example = [51, 62, 64, 65, 67, 68, 70, 72]
-    main(HTTPS_EXAMPLE, sensitive_blocks_example, url)
+    blocks_to_redact_example = [51, 62, 64, 65, 67, 68, 70, 72]
+    blocks_to_extract_example = [51]
+    main(HTTPS_EXAMPLE, blocks_to_redact_example, blocks_to_extract_example, url)

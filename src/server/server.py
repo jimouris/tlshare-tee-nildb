@@ -10,7 +10,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ValidationInfo
 from src.nildb.nildb_operations import upload_amazon_purchase
 
 from src.config.key_management import KeyManager
@@ -63,8 +63,18 @@ class SecureMessage(BaseModel):
     aes_ciphertext: str = Field(..., description="Base64 encoded AES encrypted data")
     aes_key: str = Field(..., description="Base64 encoded AES key used for encryption")
     ecdsa_signature: str = Field(..., description="Base64 encoded ECDSA signature for verification")
-    sensitive_blocks_indices: List[int] = Field(..., description="List of indices for sensitive blocks")
+    blocks_to_redact: List[int] = Field(..., description="List of indices for sensitive blocks")
+    blocks_to_extract: List[int] = Field(default_factory=list, description="List of block indices to extract data from (subset of blocks_to_redact)")
     is_test: bool = Field(False, description="Indicates if the message is a test")
+
+    @field_validator('blocks_to_extract')
+    @classmethod
+    def validate_blocks_to_extract(cls, v: List[int], info: 'ValidationInfo') -> List[int]:
+        """Validate that blocks_to_extract is a subset of blocks_to_redact."""
+        blocks_to_redact = info.data.get('blocks_to_redact', [])
+        if not all(block in blocks_to_redact for block in v):
+            raise ValueError("blocks_to_extract must be a subset of blocks_to_redact")
+        return v
 
     @field_validator('aes_ciphertext', 'aes_key', 'ecdsa_signature')
     @classmethod
@@ -104,7 +114,11 @@ async def get_public_key():
         logger.error("Error retrieving public key: %s", str(exc))
         raise HTTPException(status_code=500, detail="Failed to retrieve public key") from exc
 
-def extract_message_parts(plaintext: bytes, sensitive_indices: List[int], block_size: int) -> tuple[bytes, bytes]:
+def redact_message(
+    plaintext: bytes,
+    blocks_to_redact: List[int],
+    block_size: int
+) -> tuple[bytes, bytes]:
     """
     Extract sensitive and non-sensitive parts of the message based on block indices.
 
@@ -123,23 +137,23 @@ def extract_message_parts(plaintext: bytes, sensitive_indices: List[int], block_
     total_blocks = (len(plaintext) + block_size - 1) // block_size  # Ceiling division
     max_block_index = total_blocks - 1
 
-    invalid_indices = [idx for idx in sensitive_indices if idx > max_block_index]
+    invalid_indices = [idx for idx in blocks_to_redact if idx > max_block_index]
     if invalid_indices:
         raise ValueError(f"Invalid block indices: {invalid_indices}. Maximum valid index is {max_block_index}")
 
     # Sort indices to ensure we process blocks in order
-    sorted_indices = sorted(sensitive_indices)
+    sorted_indices = sorted(blocks_to_redact)
 
     # Initialize lists to store block indices
-    sensitive_blocks = []
-    non_sensitive_blocks = []
+    blocks_to_redact = []
+    non_blocks_to_redact = []
 
     # Distribute complete blocks into sensitive and non-sensitive
     for i in range(total_blocks):
         if i in sorted_indices:
-            sensitive_blocks.append(i)
+            blocks_to_redact.append(i)
         else:
-            non_sensitive_blocks.append(i)
+            non_blocks_to_redact.append(i)
 
     # Extract the actual data for each part
     sensitive_data = b''
@@ -150,7 +164,7 @@ def extract_message_parts(plaintext: bytes, sensitive_indices: List[int], block_
         start = i * block_size
         end = min(start + block_size, len(plaintext))
         block_data = plaintext[start:end]
-        if i in sensitive_blocks:
+        if i in blocks_to_redact:
             sensitive_data += block_data
         else:
             non_sensitive_data += block_data
@@ -188,7 +202,7 @@ async def process_secure_message(message: SecureMessage):
         logger.info("- Ciphertext length: %d bytes", len(message.aes_ciphertext))
         logger.info("- Key length: %d bytes", len(message.aes_key))
         logger.info("- Signature length: %d bytes", len(message.ecdsa_signature))
-        logger.info("- Number of sensitive blocks: %d", len(message.sensitive_blocks_indices))
+        logger.info("- Number of sensitive blocks: %d", len(message.blocks_to_redact))
 
         # Extract nonce and ciphertext
         nonce = message.aes_ciphertext[:12]
@@ -202,7 +216,7 @@ async def process_secure_message(message: SecureMessage):
 
         # Validate sensitive block indices
         invalid_indices = [
-            idx for idx in message.sensitive_blocks_indices
+            idx for idx in message.blocks_to_redact
             if idx > max_block_index
         ]
         if invalid_indices:
@@ -249,15 +263,15 @@ async def process_secure_message(message: SecureMessage):
             raise HTTPException(status_code=400, detail="Decryption failed") from exc
 
         # Extract and log sensitive and non-sensitive parts
-        sensitive_part, non_sensitive_part = extract_message_parts(
+        sensitive_part, non_sensitive_part = redact_message(
             plaintext,
-            message.sensitive_blocks_indices,
+            message.blocks_to_redact,
             BLOCK_SIZE
         )
 
         # Create the complete message with sensitive parts marked as asterisks
         complete_message = list(plaintext.decode('utf-8'))
-        for idx in sorted(message.sensitive_blocks_indices):
+        for idx in sorted(message.blocks_to_redact):
             start_pos = idx * BLOCK_SIZE
             end_pos = min(start_pos + BLOCK_SIZE, len(complete_message))
             # Replace each character in the sensitive block with an asterisk
@@ -270,22 +284,27 @@ async def process_secure_message(message: SecureMessage):
 
         # Split sensitive part into blocks and log each one
         current_pos = 0
-        value_for_nildb = None
-        for idx in sorted(message.sensitive_blocks_indices):
+        values_for_nildb = []  # Store multiple values for nildb
+        for idx in sorted(message.blocks_to_redact):
             block_length = min(BLOCK_SIZE, len(plaintext) - idx * BLOCK_SIZE)
             block = sensitive_part[current_pos:current_pos + block_length].decode('utf-8')
-            if "value" in block:
-                value_for_nildb = extract_number(block)
+            if idx in message.blocks_to_extract:  # Check if the block is in blocks_to_extract
+                values_for_nildb.append(extract_number(block))
             logger.info("  Block %d: %s", idx, block.replace('\n', ''))
             current_pos += block_length
         logger.info("- Complete message with sensitive parts: %s", ''.join(complete_message))
 
+        for value in values_for_nildb:
+            if not isinstance(value, int):
+                raise ValueError(f"Value to store in nilDB is not an integer: {value}")
         # Check if it's a test
         is_test = getattr(message, "is_test", False)  # Default to False if is_test is not provided
         if not is_test:
-            logger.info("- Storing %s to nilDB.", value_for_nildb)
-            record_ids = await upload_amazon_purchase(value_for_nildb)
-            logger.info("- Stored value to nilDB with ID %s", record_ids)
+            logger.info("- Storing %s to nilDB.", values_for_nildb)
+            record_ids = []
+            for value in values_for_nildb:
+                record_ids.extend(await upload_amazon_purchase(value))
+            logger.info("- Stored values to nilDB with IDs %s", record_ids)
         else:
             logger.info("- Skipping nilDB storage (test mode).")
 
