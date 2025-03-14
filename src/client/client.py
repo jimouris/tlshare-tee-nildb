@@ -15,7 +15,7 @@ def generate_key() -> bytes:
     """
     return AESGCM.generate_key(bit_length=256)
 
-def encrypt_message(message: str, key: bytes) -> bytes:
+def encrypt_message(message: str, key: bytes, associated_data: bytes) -> bytes:
     """Encrypt a message using AES-GCM.
 
     Args:
@@ -27,7 +27,7 @@ def encrypt_message(message: str, key: bytes) -> bytes:
     """
     aesgcm = AESGCM(key)
     nonce = os.urandom(12)
-    ciphertext = aesgcm.encrypt(nonce, message.encode(), None)
+    ciphertext = aesgcm.encrypt(nonce, message.encode(), associated_data)
     # Prepend the nonce to the ciphertext
     return nonce + ciphertext
 
@@ -63,7 +63,8 @@ def main(
     logger.info("Original message: %s", message)
 
     # Encrypt the message
-    ciphertext = encrypt_message(message, aes_key)
+    aes_associated_data = "This is a test message".encode()
+    ciphertext = encrypt_message(message, aes_key, aes_associated_data)
     logger.info("Ciphertext length (including nonce): %d bytes", len(ciphertext))
 
     # Sign the ciphertext
@@ -73,6 +74,7 @@ def main(
     # Prepare the request payload
     payload = {
         "aes_ciphertext": base64.b64encode(ciphertext).decode(),
+        "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
         "aes_key": base64.b64encode(aes_key).decode(),
         "ecdsa_signature": base64.b64encode(signature).decode(),
         "blocks_to_redact": blocks_to_redact,

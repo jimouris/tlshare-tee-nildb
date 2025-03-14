@@ -61,6 +61,7 @@ class SecureMessage(BaseModel):
     """Model for secure message containing encrypted data and metadata."""
 
     aes_ciphertext: str = Field(..., description="Base64 encoded AES encrypted data")
+    aes_associated_data: str = Field(..., description="Base64 encoded AES associated data")
     aes_key: str = Field(..., description="Base64 encoded AES key used for encryption")
     ecdsa_signature: str = Field(..., description="Base64 encoded ECDSA signature for verification")
     blocks_to_redact: List[int] = Field(..., description="List of indices for sensitive blocks")
@@ -76,7 +77,7 @@ class SecureMessage(BaseModel):
             raise ValueError("blocks_to_extract must be a subset of blocks_to_redact")
         return v
 
-    @field_validator('aes_ciphertext', 'aes_key', 'ecdsa_signature')
+    @field_validator('aes_ciphertext', 'aes_associated_data', 'aes_key', 'ecdsa_signature')
     @classmethod
     def decode_base64(cls, v: str) -> bytes:
         """Decode base64 string to bytes."""
@@ -200,6 +201,7 @@ async def process_secure_message(message: SecureMessage):
         # Log message details (excluding sensitive data)
         logger.info("Message details [request_id: %s]:", request_id)
         logger.info("- Ciphertext length: %d bytes", len(message.aes_ciphertext))
+        logger.info("- Associated data length: %d bytes", len(message.aes_associated_data))
         logger.info("- Key length: %d bytes", len(message.aes_key))
         logger.info("- Signature length: %d bytes", len(message.ecdsa_signature))
         logger.info("- Number of sensitive blocks: %d", len(message.blocks_to_redact))
@@ -207,6 +209,7 @@ async def process_secure_message(message: SecureMessage):
         # Extract nonce and ciphertext
         nonce = message.aes_ciphertext[:12]
         ciphertext = message.aes_ciphertext[12:]
+        aes_associated_data = message.aes_associated_data
         logger.debug("Nonce and ciphertext extracted [request_id: %s]", request_id)
 
         # Calculate maximum block index based on ciphertext length
@@ -253,7 +256,7 @@ async def process_secure_message(message: SecureMessage):
 
         # Decrypt the ciphertext
         try:
-            plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+            plaintext = aesgcm.decrypt(nonce, ciphertext, aes_associated_data)
             logger.info("Message successfully decrypted [request_id: %s]", request_id)
         except InvalidTag as exc:
             logger.error("Decryption failed - invalid ciphertext [request_id: %s]", request_id)

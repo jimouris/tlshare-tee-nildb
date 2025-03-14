@@ -50,7 +50,8 @@ def test_process_secure_message(
 
     # Generate nonce and encrypt
     nonce = os.urandom(12)  # Use random nonce instead of fixed one
-    ciphertext = aesgcm.encrypt(nonce, sample_message.encode(), None)
+    aes_associated_data = "test_associated_data".encode()
+    ciphertext = aesgcm.encrypt(nonce, sample_message.encode(), aes_associated_data)
     full_ciphertext = nonce + ciphertext
 
     # Sign the data
@@ -60,6 +61,7 @@ def test_process_secure_message(
     # Prepare the request payload
     payload = {
         "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
+        "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
         "aes_key": base64.b64encode(aes_key).decode(),
         "ecdsa_signature": base64.b64encode(signature).decode(),
         "blocks_to_redact": sample_blocks_to_redact,
@@ -82,16 +84,18 @@ def test_invalid_signature(client: TestClient, key_manager: KeyManager, sample_m
     aesgcm = AESGCM(aes_key)
 
     # Generate nonce and encrypt
-    nonce = b"test_nonce_12"
+    nonce = "test_nonce_12".encode()
+    aes_associated_data = "test_associated_data".encode()
     ciphertext = aesgcm.encrypt(nonce, sample_message.encode(), None)
     full_ciphertext = nonce + ciphertext
 
     # Create invalid signature
-    invalid_signature = b"invalid" * 8  # 64 bytes of invalid data
+    invalid_signature = "invalid".encode() * 8  # 64 bytes of invalid data
 
     # Prepare the request payload
     payload = {
         "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
+        "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
         "aes_key": base64.b64encode(aes_key).decode(),
         "ecdsa_signature": base64.b64encode(invalid_signature).decode(),
         "blocks_to_redact": [1, 3],
@@ -114,7 +118,8 @@ def test_invalid_block_indices(client: TestClient, key_manager: KeyManager, samp
 
     # Generate nonce and encrypt
     nonce = os.urandom(12)  # Use random nonce
-    ciphertext = aesgcm.encrypt(nonce, sample_message.encode(), None)
+    aes_associated_data = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, sample_message.encode(), aes_associated_data)
     full_ciphertext = nonce + ciphertext
 
     # Sign the data
@@ -124,6 +129,7 @@ def test_invalid_block_indices(client: TestClient, key_manager: KeyManager, samp
     # Prepare the request payload with invalid block indices
     payload = {
         "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
+        "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
         "aes_key": base64.b64encode(aes_key).decode(),
         "ecdsa_signature": base64.b64encode(signature).decode(),
         "blocks_to_redact": [100],  # Invalid index
