@@ -49,7 +49,6 @@ async def lifespan(_: FastAPI):
 
     logger.info("Available endpoints:")
     logger.info("- GET /")
-    logger.info("- GET /public-key")
     logger.info("- POST /process-secure-message")
 
     yield
@@ -57,27 +56,40 @@ async def lifespan(_: FastAPI):
     # Shutdown
     logger.info("Server shutting down...")
 
-class SecureMessage(BaseModel):
-    """Model for secure message containing encrypted data and metadata."""
-
+class Record(BaseModel):
+    """Model for a single record containing encrypted data and metadata."""
     aes_ciphertext: str = Field(..., description="Base64 encoded AES encrypted data")
     aes_associated_data: str = Field(..., description="Base64 encoded AES associated data")
-    aes_key: str = Field(..., description="Base64 encoded AES key used for encryption")
-    ecdsa_signature: str = Field(..., description="Base64 encoded ECDSA signature for verification")
     blocks_to_redact: List[int] = Field(..., description="List of indices for sensitive blocks")
-    blocks_to_extract: List[int] = Field(default_factory=list, description="List of block indices to extract data from (subset of blocks_to_redact)")
-    is_test: bool = Field(False, description="Indicates if the message is a test")
+    blocks_to_extract: List[int] = Field(default_factory=list, description="List of block indices to extract data from")
 
     @field_validator('blocks_to_extract')
     @classmethod
-    def validate_blocks_to_extract(cls, v: List[int], info: 'ValidationInfo') -> List[int]:
+    def validate_blocks_to_extract(cls, v: List[int], info: ValidationInfo) -> List[int]:
         """Validate that blocks_to_extract is a subset of blocks_to_redact."""
         blocks_to_redact = info.data.get('blocks_to_redact', [])
         if not all(block in blocks_to_redact for block in v):
             raise ValueError("blocks_to_extract must be a subset of blocks_to_redact")
         return v
 
-    @field_validator('aes_ciphertext', 'aes_associated_data', 'aes_key', 'ecdsa_signature')
+    @field_validator('aes_ciphertext', 'aes_associated_data')
+    @classmethod
+    def decode_base64(cls, v: str) -> bytes:
+        """Decode base64 string to bytes."""
+        try:
+            return b64decode(v)
+        except Exception as exc:
+            logger.error("Base64 decoding failed: %s", str(exc))
+            raise ValueError("Invalid base64 encoding") from exc
+
+class SecureMessage(BaseModel):
+    """Model for secure message containing multiple records."""
+    aes_key: str = Field(..., description="Base64 encoded AES key used for encryption")
+    records: List[Record] = Field(..., description="List of records to process")
+    ecdsa_signature: str = Field(..., description="Base64 encoded ECDSA signature for verification")
+    is_test: bool = Field(False, description="Indicates if the message is a test")
+
+    @field_validator('aes_key', 'ecdsa_signature')
     @classmethod
     def decode_base64(cls, v: str) -> bytes:
         """Decode base64 string to bytes."""
@@ -102,18 +114,6 @@ async def root():
     """Root endpoint that redirects to the API documentation."""
     logger.info("Root endpoint accessed, redirecting to docs")
     return RedirectResponse(url="/docs", status_code=307, headers={"Location": "/docs"})
-
-@app.get("/public-key")
-async def get_public_key():
-    """Get the server's public key."""
-    try:
-        with open(key_manager.public_key_path, "rb") as f:
-            public_key_data = f.read()
-        logger.info("Public key retrieved successfully")
-        return Response(content=public_key_data, media_type="application/x-pem-file")
-    except Exception as exc:
-        logger.error("Error retrieving public key: %s", str(exc))
-        raise HTTPException(status_code=500, detail="Failed to retrieve public key") from exc
 
 def redact_message(
     plaintext: bytes,
@@ -198,52 +198,16 @@ async def process_secure_message(message: SecureMessage):
     logger.info("Processing secure message [request_id: %s]", request_id)
 
     try:
-        # Log message details (excluding sensitive data)
-        logger.info("Message details [request_id: %s]:", request_id)
-        logger.info("- Ciphertext length: %d bytes", len(message.aes_ciphertext))
-        logger.info("- Associated data length: %d bytes", len(message.aes_associated_data))
-        logger.info("- Key length: %d bytes", len(message.aes_key))
-        logger.info("- Signature length: %d bytes", len(message.ecdsa_signature))
-        logger.info("- Number of sensitive blocks: %d", len(message.blocks_to_redact))
-
-        # Extract nonce and ciphertext
-        nonce = message.aes_ciphertext[:12]
-        ciphertext = message.aes_ciphertext[12:]
-        aes_associated_data = message.aes_associated_data
-        logger.debug("Nonce and ciphertext extracted [request_id: %s]", request_id)
-
-        # Calculate maximum block index based on ciphertext length
-        # Subtract 12 bytes for the nonce and divide by block size
-        max_block_index = (len(ciphertext) - 1) // BLOCK_SIZE
-        logger.info("Maximum valid block index: %d [request_id: %s]", max_block_index, request_id)
-
-        # Validate sensitive block indices
-        invalid_indices = [
-            idx for idx in message.blocks_to_redact
-            if idx > max_block_index
-        ]
-        if invalid_indices:
-            logger.error(
-                "Invalid sensitive block indices: %s [request_id: %s]",
-                invalid_indices,
-                request_id
-            )
-            logger.error("Block indices must be between 0 and %d", max_block_index)
-            raise ValueError(
-                f"Invalid sensitive block indices: {invalid_indices}. "
-                f"Maximum valid index is {max_block_index}"
-            )
-
-        # Verify the signature
-        data_to_verify = message.aes_ciphertext
+        # Verify the signature over concatenated ciphertexts
+        concatenated_ciphertexts = b''.join(record.aes_ciphertext for record in message.records)
         logger.info("Verifying signature [request_id: %s]", request_id)
-        logger.info("- Data to verify length: %d bytes", len(data_to_verify))
+        logger.info("- Data to verify length: %d bytes", len(concatenated_ciphertexts))
         logger.info("- Signature length: %d bytes", len(message.ecdsa_signature))
 
         try:
-            is_valid = key_manager.verify_signature(data_to_verify, message.ecdsa_signature)
+            is_valid = key_manager.verify_signature(concatenated_ciphertexts, message.ecdsa_signature)
             if not is_valid:
-                logger.error("Signature verification failed - invalid signature [request_id: %s]", request_id)
+                logger.error("Signature verification failed [request_id: %s]", request_id)
                 raise HTTPException(status_code=400, detail="Invalid signature")
             logger.info("Signature verification successful [request_id: %s]", request_id)
         except Exception as exc:
@@ -253,65 +217,75 @@ async def process_secure_message(message: SecureMessage):
         # Create AESGCM instance with the provided key
         aesgcm = AESGCM(message.aes_key)
         logger.debug("AESGCM instance created [request_id: %s]", request_id)
-
-        # Decrypt the ciphertext
-        try:
-            plaintext = aesgcm.decrypt(nonce, ciphertext, aes_associated_data)
-            logger.info("Message successfully decrypted [request_id: %s]", request_id)
-        except InvalidTag as exc:
-            logger.error("Decryption failed - invalid ciphertext [request_id: %s]", request_id)
-            raise HTTPException(status_code=400, detail="Invalid ciphertext") from exc
-        except Exception as exc:
-            logger.error("Decryption error [request_id: %s]: %s", request_id, str(exc))
-            raise HTTPException(status_code=400, detail="Decryption failed") from exc
-
-        # Extract and log sensitive and non-sensitive parts
-        sensitive_part, non_sensitive_part = redact_message(
-            plaintext,
-            message.blocks_to_redact,
-            BLOCK_SIZE
-        )
-
-        # Create the complete message with sensitive parts marked as asterisks
-        complete_message = list(plaintext.decode('utf-8'))
-        for idx in sorted(message.blocks_to_redact):
-            start_pos = idx * BLOCK_SIZE
-            end_pos = min(start_pos + BLOCK_SIZE, len(complete_message))
-            # Replace each character in the sensitive block with an asterisk
-            complete_message[start_pos:end_pos] = ['*'] * (end_pos - start_pos)
-
-        logger.info("Message parts [request_id: %s]:", request_id)
-        logger.info("- Sensitive part length: %d bytes", len(sensitive_part))
-        logger.info("- Non-sensitive part length: %d bytes", len(non_sensitive_part))
-        logger.info("- Sensitive parts:")
-
-        # Split sensitive part into blocks and log each one
-        current_pos = 0
-        values_for_nildb = []  # Store multiple values for nildb
-        for idx in sorted(message.blocks_to_redact):
-            block_length = min(BLOCK_SIZE, len(plaintext) - idx * BLOCK_SIZE)
-            block = sensitive_part[current_pos:current_pos + block_length].decode('utf-8')
-            if idx in message.blocks_to_extract:  # Check if the block is in blocks_to_extract
-                values_for_nildb.append(extract_number(block))
-            logger.info("  Block %d: %s", idx, block.replace('\n', ''))
-            current_pos += block_length
-        logger.info("- Complete message with sensitive parts: %s", ''.join(complete_message))
-
-        for value in values_for_nildb:
-            if not isinstance(value, int):
-                raise ValueError(f"Value to store in nilDB is not an integer: {value}")
-        # Check if it's a test
         is_test = getattr(message, "is_test", False)  # Default to False if is_test is not provided
-        if not is_test:
-            logger.info("- Storing %s to nilDB.", values_for_nildb)
-            record_ids = []
-            for value in values_for_nildb:
-                record_ids.extend(await upload_amazon_purchase(value))
-            logger.info("- Stored values to nilDB with IDs %s", record_ids)
-        else:
-            logger.info("- Skipping nilDB storage (test mode).")
 
-        logger.info("Request completed successfully [request_id: %s]", request_id)
+        # Process each record
+        all_record_ids = []
+        for i, record in enumerate(message.records):
+            logger.info("Processing record %d [request_id: %s]", i, request_id)
+
+            # Extract nonce and ciphertext
+            nonce = record.aes_ciphertext[:12]
+            ciphertext = record.aes_ciphertext[12:]
+
+            try:
+                plaintext = aesgcm.decrypt(nonce, ciphertext, record.aes_associated_data)
+                logger.info("Message successfully decrypted [request_id: %s]", request_id)
+            except InvalidTag as exc:
+                logger.error("Decryption failed for record %d [request_id: %s]", i, request_id)
+                raise HTTPException(status_code=400, detail=f"Invalid ciphertext in record {i}") from exc
+
+            sensitive_part, non_sensitive_part = redact_message(
+                plaintext,
+                record.blocks_to_redact,
+                BLOCK_SIZE
+            )
+
+            # Create the complete message with sensitive parts marked as asterisks
+            complete_message = list(plaintext.decode('utf-8'))
+            for idx in sorted(record.blocks_to_redact):
+                start_pos = idx * BLOCK_SIZE
+                end_pos = min(start_pos + BLOCK_SIZE, len(complete_message))
+                # Replace each character in the sensitive block with an asterisk
+                complete_message[start_pos:end_pos] = ['*'] * (end_pos - start_pos)
+
+            logger.info("Message parts [request_id: %s]:", request_id)
+            logger.info("- Sensitive part length: %d bytes", len(sensitive_part))
+            logger.info("- Non-sensitive part length: %d bytes", len(non_sensitive_part))
+            logger.info("- Sensitive parts:")
+
+            # Process blocks and extract values
+            current_pos = 0
+            values_for_nildb = []
+            for idx in sorted(record.blocks_to_redact):
+                block_length = min(BLOCK_SIZE, len(plaintext) - idx * BLOCK_SIZE)
+                block = sensitive_part[current_pos:current_pos + block_length].decode('utf-8')
+                if idx in record.blocks_to_extract: # Check if the block is in blocks_to_extract
+                    values_for_nildb.append(extract_number(block))
+                logger.info("  Block %d: %s", idx, block.replace('\n', ''))
+                current_pos += block_length
+            logger.info("- Complete message with sensitive parts: %s", ''.join(complete_message))
+
+            for value in values_for_nildb:
+                if not isinstance(value, int):
+                    raise ValueError(f"Value to store in nilDB is not an integer: {value}")
+
+            # Store values in nildb if not a test
+            if not is_test:
+                logger.info("- Storing %s to nilDB.", values_for_nildb)
+                record_ids = []
+                for value in values_for_nildb:
+                    record_ids.extend(await upload_amazon_purchase(value))
+                all_record_ids.extend(record_ids)
+                logger.info("- Stored values to nilDB with IDs %s", record_ids)
+            else:
+                logger.info("- Skipping nilDB storage (test mode).")
+
+        if not is_test:
+            logger.info("Stored all values to nilDB with IDs %s", all_record_ids)
+        else:
+            logger.info("Skipping nilDB storage (test mode)")
+
         return {"status": "success"}
 
     except HTTPException:

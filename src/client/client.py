@@ -32,19 +32,26 @@ def encrypt_message(message: str, key: bytes, associated_data: bytes) -> bytes:
     return nonce + ciphertext
 
 def main(
-        message: str,
-        blocks_to_redact: list[int],
-        blocks_to_extract: list[int],
+        messages: list[str],
+        blocks_to_redact: list[list[int]],
+        blocks_to_extract: list[list[int]],
         server_url: str = "http://localhost:8000"
     ) -> None:
     """Main function to demonstrate secure message sending.
 
     Args:
-        message: The message to send.
-        blocks_to_redact: List of indices for sensitive blocks.
-        blocks_to_extract: List of block indices to extract data from (subset of blocks_to_redact).
+        messages: List of messages to send.
+        blocks_to_redact: List of lists of indices for sensitive blocks.
+        blocks_to_extract: List of lists of block indices to extract data from.
         server_url: The URL of the server (default: http://localhost:8000).
     """
+    # Validate that all lists have the same length
+    if not (len(messages) == len(blocks_to_redact) == len(blocks_to_extract)):
+        raise ValueError(
+            f"All input lists must have the same length. Got: messages={len(messages)}, "
+            f"blocks_to_redact={len(blocks_to_redact)}, blocks_to_extract={len(blocks_to_extract)}"
+        )
+
     # Initialize key manager
     key_manager = KeyManager()
 
@@ -59,33 +66,37 @@ def main(
     # Generate a random AES key
     aes_key = generate_key()
 
-    logger.info("Original message length: %d bytes", len(message))
-    logger.info("Original message: %s", message)
+    # Process each message
+    records = []
+    concatenated_ciphertexts = b''
 
-    # Encrypt the message
-    aes_associated_data = "This is a test message".encode()
-    ciphertext = encrypt_message(message, aes_key, aes_associated_data)
-    logger.info("Ciphertext length (including nonce): %d bytes", len(ciphertext))
+    for message, redact_blocks, extract_blocks in zip(messages, blocks_to_redact, blocks_to_extract):
+        aes_associated_data = os.urandom(12)
+        ciphertext = encrypt_message(message, aes_key, aes_associated_data)
+        concatenated_ciphertexts += ciphertext
 
-    # Sign the ciphertext
-    data_to_sign = ciphertext
-    signature = key_manager.sign_data(data_to_sign)
+        records.append({
+            "aes_ciphertext": base64.b64encode(ciphertext).decode(),
+            "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
+            "blocks_to_redact": redact_blocks,
+            "blocks_to_extract": extract_blocks,
+        })
+
+    # Sign the concatenated ciphertexts
+    signature = key_manager.sign_data(concatenated_ciphertexts)
 
     # Prepare the request payload
     payload = {
-        "aes_ciphertext": base64.b64encode(ciphertext).decode(),
-        "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
         "aes_key": base64.b64encode(aes_key).decode(),
+        "records": records,
         "ecdsa_signature": base64.b64encode(signature).decode(),
-        "blocks_to_redact": blocks_to_redact,
-        "blocks_to_extract": blocks_to_extract,
     }
 
     # Send the request to the server
     response = requests.post(
         f"{server_url}/process-secure-message",
         json=payload,
-        timeout=30  # 30 second timeout
+        timeout=30
     )
 
     if response.status_code == 200:
@@ -103,7 +114,7 @@ if __name__ == "__main__":
     else:
         url = sys.argv[1]
 
-    HTTPS_EXAMPLE = """
+    amazon_example = """
     HTTP/2 200 OK
     Content-Type: application/json
     Content-Length: 256
@@ -140,6 +151,10 @@ if __name__ == "__main__":
       }
     }
     """
-    blocks_to_redact_example = [51, 62, 64, 65, 67, 68, 70, 72]
-    blocks_to_extract_example = [51]
-    main(HTTPS_EXAMPLE, blocks_to_redact_example, blocks_to_extract_example, url)
+    amazon_example_blocks_to_redact = [51, 62, 64, 65, 67, 68, 70, 72]
+    amazon_example_blocks_to_extract = [51]
+
+    messages = [amazon_example]
+    blocks_to_redact = [amazon_example_blocks_to_redact]
+    blocks_to_extract = [amazon_example_blocks_to_extract]
+    main(messages, blocks_to_redact, blocks_to_extract, url)

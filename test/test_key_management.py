@@ -67,24 +67,3 @@ def test_load_nonexistent_keys(key_manager: KeyManager):
 
     with pytest.raises(FileNotFoundError):
         key_manager.load_public_key()
-
-def test_fetch_remote_public_key(key_manager: KeyManager, test_config: Path):
-    """Test fetching remote public key."""
-    # Create a test client for the FastAPI app
-    client = TestClient(app)
-
-    # Generate keys first
-    key_manager.generate_keys()
-
-    # Fetch the public key using the test client
-    response = client.get("/public-key")
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "application/x-pem-file"
-
-    # Verify the key was saved
-    assert key_manager.remote_public_key_path.exists()
-
-    # Load the fetched public key and verify its type
-    with open(key_manager.remote_public_key_path, "rb") as f:
-        public_key = serialization.load_pem_public_key(f.read())
-        assert isinstance(public_key, ec.EllipticCurvePublicKey)
