@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10"]
+        python-version: ["3.11"]
 
     steps:
     - uses: actions/checkout@v4
@@ -44,8 +44,8 @@ jobs:
       run: |
         uv run pylint src/
 
-    # - name: Run tests
-    #   run: |
-    #     uv run python -m pytest
-    #   env:
-    #     PYTHONPATH: ${{ github.workspace }}
+    - name: Run tests
+      run: |
+        uv run python -m pytest
+      env:
+        PYTHONPATH: ${{ github.workspace }}
