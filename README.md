@@ -1,14 +1,33 @@
-# tlshare-tee-nildb
-Server (running on a TEE) that accepts requests from a client of a zkTLS connection and secret shares the data to nilDB.
+# TLShare
+## Secret Share Data from TLS Connections with Provenance
 
+TLShare is a privacy-preserving solution that enables secure extraction and secret sharing of sensitive data from TLS connections.
+It combines zkTLS (zero-knowledge TLS) with Trusted Execution Environments (TEE) to provide:
+1. **Data Privacy**: Extracts and secret shares sensitive data (e.g., purchase amounts) while keeping the rest of the TLS traffic private. The secret shares are stored in [nilDB](https://docs.nillion.com/build/secret-vault).
+2. **Data Provenance**: Ensures that the extracted data genuinely came from a specific TLS connection.
+3. **Secure Processing**: Uses TEE to handle sensitive data securely and prevent tampering.
+
+This repository contains the TEE server component that processes zkTLS client requests and handles the secure storage of extracted data.
+We additionally provide a demo client that can be replaced by any zkTLS frontend implementation.
+
+The server accepts a payload with multiple records in the following format:
 ```json
 {
-    "aes_ciphertext": "base64_encoded_bytes",
     "aes_key": "base64_encoded_bytes",
+    "records": [
+        {
+            "aes_ciphertext": "base64_encoded_bytes",
+            "aes_associated_data": "base64_encoded_bytes",
+            "blocks_to_redact": [1, 2, 3],
+            "blocks_to_extract": [2]
+        },
+    ],
     "ecdsa_signature": "base64_encoded_bytes",
-    "blocks_to_redact": [1, 2, 3]
+    "is_test": false
 }
 ```
+
+Note: The `ecdsa_signature` is computed over the concatenation of all `aes_ciphertext` values in the records array.
 
 ## Installation
 
@@ -51,6 +70,8 @@ The test suite includes:
 - Unit tests for message processing
 - Integration tests for the FastAPI server
 - Tests for key management and encryption
+- Tests for handling multiple records in a single request
+- Tests for signature verification over concatenated ciphertexts
 
 ### Linting
 
@@ -85,7 +106,7 @@ The server will start on `http://0.0.0.0:8000`. You can:
 To run the client, use the following command:
 
 ```bash
-python src/client/client.py [SERVER_URL]
+python -m src.client.client [SERVER_URL]
 ```
 
 - **`SERVER_URL`**: (Optional) The URL of the server. If not provided, the client defaults to `http://localhost:8000`.
@@ -94,12 +115,16 @@ python src/client/client.py [SERVER_URL]
 
 1. **Default (localhost)**:
    ```bash
-   python src/client/client.py
+   python -m src.client.client
    ```
 
 2. **Custom Server URL**:
    ```bash
-   python src/client/client.py http://example.com:8000
+   python -m src.client.client http://example.com:8000
    ```
 
-The client will send a secure message to the specified server URL.
+The client will send a secure message with multiple records to the specified server URL. Each record in the example contains an Amazon purchase response, with sensitive blocks (like total amount) being redacted and extracted for storage in nilDB.
+
+### Test Mode
+
+You can set `is_test: true` in the payload to prevent the server from storing extracted values in nilDB. This is useful for testing and development.

@@ -58,8 +58,8 @@ async def lifespan(_: FastAPI):
 
 class Record(BaseModel):
     """Model for a single record containing encrypted data and metadata."""
-    aes_ciphertext: str = Field(..., description="Base64 encoded AES encrypted data")
-    aes_associated_data: str = Field(..., description="Base64 encoded AES associated data")
+    aes_ciphertext: bytes = Field(..., description="Base64 encoded AES encrypted data")
+    aes_associated_data: bytes = Field(..., description="Base64 encoded AES associated data")
     blocks_to_redact: List[int] = Field(..., description="List of indices for sensitive blocks")
     blocks_to_extract: List[int] = Field(default_factory=list, description="List of block indices to extract data from")
 
@@ -72,7 +72,7 @@ class Record(BaseModel):
             raise ValueError("blocks_to_extract must be a subset of blocks_to_redact")
         return v
 
-    @field_validator('aes_ciphertext', 'aes_associated_data')
+    @field_validator('aes_ciphertext', 'aes_associated_data', mode='before')
     @classmethod
     def decode_base64(cls, v: str) -> bytes:
         """Decode base64 string to bytes."""
@@ -84,12 +84,12 @@ class Record(BaseModel):
 
 class SecureMessage(BaseModel):
     """Model for secure message containing multiple records."""
-    aes_key: str = Field(..., description="Base64 encoded AES key used for encryption")
+    aes_key: bytes = Field(..., description="Base64 encoded AES key used for encryption")
     records: List[Record] = Field(..., description="List of records to process")
-    ecdsa_signature: str = Field(..., description="Base64 encoded ECDSA signature for verification")
+    ecdsa_signature: bytes = Field(..., description="Base64 encoded ECDSA signature for verification")
     is_test: bool = Field(False, description="Indicates if the message is a test")
 
-    @field_validator('aes_key', 'ecdsa_signature')
+    @field_validator('aes_key', 'ecdsa_signature', mode='before')
     @classmethod
     def decode_base64(cls, v: str) -> bytes:
         """Decode base64 string to bytes."""
