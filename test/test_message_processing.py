@@ -4,7 +4,8 @@ import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from src.config.key_management import KeyManager
-from src.server.server import redact_message, BLOCK_SIZE, extract_number
+from src.server.server import BLOCK_SIZE, extract_number, redact_message
+
 
 def test_extract_message_parts():
     """Test extracting sensitive and non-sensitive parts of a message."""
@@ -14,9 +15,7 @@ def test_extract_message_parts():
 
     # Extract parts
     sensitive_part, non_sensitive_part = redact_message(
-        message,
-        sensitive_indices,
-        BLOCK_SIZE
+        message, sensitive_indices, BLOCK_SIZE
     )
 
     # Verify lengths
@@ -29,6 +28,7 @@ def test_extract_message_parts():
 
     assert len(sensitive_part) == expected_sensitive_length
     assert len(non_sensitive_part) == len(message) - expected_sensitive_length
+
 
 def test_extract_message_parts_with_partial_block():
     """Test extracting parts when the last block is partial."""
@@ -38,9 +38,7 @@ def test_extract_message_parts_with_partial_block():
 
     # Extract parts
     sensitive_part, non_sensitive_part = redact_message(
-        message,
-        sensitive_indices,
-        BLOCK_SIZE
+        message, sensitive_indices, BLOCK_SIZE
     )
 
     # Verify lengths
@@ -53,6 +51,7 @@ def test_extract_message_parts_with_partial_block():
 
     assert len(sensitive_part) == expected_sensitive_length
     assert len(non_sensitive_part) == len(message) - expected_sensitive_length
+
 
 def test_process_secure_message(
     key_manager: KeyManager,
@@ -86,17 +85,17 @@ def test_process_secure_message(
 
     # Test message parts extraction
     sensitive_part, non_sensitive_part = redact_message(
-        decrypted,
-        sample_blocks_to_redact,
-        BLOCK_SIZE
+        decrypted, sample_blocks_to_redact, BLOCK_SIZE
     )
     current_pos = 0
     extracted_number = None
     for idx in sorted(sample_blocks_to_redact):
         block_length = min(BLOCK_SIZE, len(decrypted) - idx * BLOCK_SIZE)
-        block = sensitive_part[current_pos:current_pos + block_length].decode('utf-8')
+        block = sensitive_part[current_pos : current_pos + block_length].decode("utf-8")
         print(f"Block {idx}: {block}")
-        if idx in sample_blocks_to_extract:  # Check if the block is in blocks_to_extract
+        if (
+            idx in sample_blocks_to_extract
+        ):  # Check if the block is in blocks_to_extract
             extracted_number = extract_number(block)
         current_pos += block_length
 
@@ -104,6 +103,7 @@ def test_process_secure_message(
     assert len(sensitive_part) == BLOCK_SIZE * len(sample_blocks_to_redact)
     assert len(non_sensitive_part) == len(decrypted) - len(sensitive_part)
     assert extracted_number == 100
+
 
 def test_invalid_signature(key_manager: KeyManager, sample_message: str):
     """Test handling of invalid signatures."""
@@ -125,6 +125,7 @@ def test_invalid_signature(key_manager: KeyManager, sample_message: str):
     # Verify that invalid signature is rejected
     data_to_verify = full_ciphertext + aes_key
     assert not key_manager.verify_signature(data_to_verify, invalid_signature)
+
 
 def test_invalid_block_indices():
     """Test handling of invalid block indices."""

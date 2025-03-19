@@ -1,4 +1,5 @@
-# TLShare
+# TLShare [![GitHub license](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/jimouris/tlshare-tee-nildb/blob/main/LICENSE)
+
 ## Secret Share Data from TLS Connections with Provenance
 
 TLShare is a privacy-preserving solution that enables secure extraction and secret sharing of sensitive data from TLS connections.
@@ -34,18 +35,18 @@ Note: The `ecdsa_signature` is computed over the concatenation of all `aes_ciphe
 This project uses `uv` for Python package management. To get started:
 
 1. Install `uv` if you haven't already:
-```bash
+```shell
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 2. Create and activate a virtual environment:
-```bash
+```shell
 uv venv
 source .venv/bin/activate  # On Unix/macOS
 ```
 
 3. Install dependencies:
-```bash
+```shell
 uv pip install -e ".[dev]"  # For all development tools
 ```
 
@@ -55,14 +56,14 @@ uv pip install -e ".[dev]"  # For all development tools
 
 The project uses `pytest` for testing. First, make sure you have installed the package in development mode:
 
-```bash
+```shell
 # Install test dependencies and the package in development mode
 uv pip install -e ".[test]"
 ```
 
 Then you can run the tests:
 
-```bash
+```shell
 python -m pytest
 ```
 
@@ -77,7 +78,7 @@ The test suite includes:
 
 The project uses `pylint` for code linting. To run the linter:
 
-```bash
+```shell
 uv pip install -e ".[lint]"
 pylint src/
 ```
@@ -85,13 +86,13 @@ pylint src/
 ### Setup nilDB
 After you get your nilDB credentials, copy `.env.sample` to `.env` and store your credentials.
 Then, set up a new nilDB schema and query by running:
-```bash
+```shell
 python -m src.nildb.nildb_operations
 ```
 
 ### Running the Server
 To run the FastAPI server:
-```bash
+```shell
 python -m src.server.server
 ```
 
@@ -105,7 +106,7 @@ The server will start on `http://0.0.0.0:8000`. You can:
 
 To run the client, use the following command:
 
-```bash
+```shell
 python -m src.client.client [SERVER_URL]
 ```
 
@@ -114,12 +115,12 @@ python -m src.client.client [SERVER_URL]
 ### Example Usage
 
 1. **Default (localhost)**:
-   ```bash
+   ```shell
    python -m src.client.client
    ```
 
 2. **Custom Server URL**:
-   ```bash
+   ```shell
    python -m src.client.client http://example.com:8000
    ```
 

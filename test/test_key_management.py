@@ -1,13 +1,11 @@
 """Tests for key management functionality."""
 
 import pytest
-from pathlib import Path
-from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
-from fastapi.testclient import TestClient
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from src.config.key_management import KeyManager
-from src.server.server import app
+
 
 def test_generate_keys(key_manager: KeyManager):
     """Test key generation and saving."""
@@ -27,6 +25,7 @@ def test_generate_keys(key_manager: KeyManager):
         public_key = serialization.load_pem_public_key(f.read())
         assert isinstance(public_key, ec.EllipticCurvePublicKey)
 
+
 def test_load_keys(key_manager: KeyManager):
     """Test loading keys from disk."""
     # First generate keys
@@ -39,6 +38,7 @@ def test_load_keys(key_manager: KeyManager):
     # Test loading public key
     public_key = key_manager.load_public_key()
     assert isinstance(public_key, ec.EllipticCurvePublicKey)
+
 
 def test_sign_and_verify(key_manager: KeyManager):
     """Test signing and verification of data."""
@@ -59,6 +59,7 @@ def test_sign_and_verify(key_manager: KeyManager):
     # Test with modified data
     modified_data = b"Hello, World?"
     assert not key_manager.verify_signature(modified_data, signature)
+
 
 def test_load_nonexistent_keys(key_manager: KeyManager):
     """Test loading nonexistent keys raises FileNotFoundError."""

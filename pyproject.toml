@@ -1,10 +1,13 @@
 [project]
 name = "tlshare-tee-nildb"
-version = "0.0.0"
+version = "0.0.1"
 description = """\
     Server (running on a TEE) that accepts requests from a client\
      of a zkTLS connection and secret shares the data to nilDB.\
     """
+authors = [
+    { name = "Dimitris Mouris", email = "dimitris@nillion.com" },
+]
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,42 +23,24 @@ dependencies = [
 
 [project.urls]
 Repository = "https://github.com/jimouris/tlshare-tee-nildb"
-#Documentation = "https://tlshare-tee-nildb.readthedocs.io"
 
 [project.optional-dependencies]
-docs = [
-    "toml~=0.10.2",
-    "sphinx~=5.0",
-    "sphinx-rtd-theme~=2.0.0"
-]
-test = [
-    "pytest~=8.2",
-    "pytest-cov~=5.0",
-    "pytest-asyncio~=0.23.5",
-    "httpx~=0.26.0"
-]
-lint = [
-    "pylint~=3.2.0"
-]
-coveralls = [
-    "coveralls~=4.0"
-]
-publish = [
-    "build~=0.10",
-    "twine~=4.0"
-]
 dev = [
-    "pylint~=3.2.0",
-    "pytest~=8.2",
-    "pytest-cov~=5.0",
-    "pytest-asyncio~=0.23.5",
-    "httpx~=0.26.0",
-    "toml~=0.10.2",
-    "sphinx~=5.0",
-    "sphinx-rtd-theme~=2.0.0",
-    "coveralls~=4.0",
-    "build~=0.10",
-    "twine~=4.0"
+    "black>=24.10.0",
+    "isort>=5.13.2",
+    "pylint>=3.2.7",
+]
+
+test = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+]
+
+lint = [
+    "pylint>=3.2.7",
+    "isort>=5.13.2",
 ]
 
 [build-system]
@@ -63,6 +48,3 @@ requires = [
     "setuptools>=68.0"
 ]
 build-backend = "setuptools.build_meta"
-
-[tool.pytest.ini_options]
-addopts = "--doctest-modules --ignore=docs --cov=src --cov-report term-missing"

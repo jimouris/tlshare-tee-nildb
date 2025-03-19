@@ -1,11 +1,14 @@
 """Client for sending secure messages to the TEE server."""
 
-import os
 import base64
+import os
+
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 from src.config.key_management import KeyManager
 from src.config.logging import logger
+
 
 def generate_key() -> bytes:
     """Generate a random AES key.
@@ -14,6 +17,7 @@ def generate_key() -> bytes:
         bytes: A 256-bit AES key
     """
     return AESGCM.generate_key(bit_length=256)
+
 
 def encrypt_message(message: str, key: bytes, associated_data: bytes) -> bytes:
     """Encrypt a message using AES-GCM.
@@ -31,12 +35,13 @@ def encrypt_message(message: str, key: bytes, associated_data: bytes) -> bytes:
     # Prepend the nonce to the ciphertext
     return nonce + ciphertext
 
+
 def main(
-        messages: list[str],
-        blocks_to_redact: list[list[int]],
-        blocks_to_extract: list[list[int]],
-        server_url: str = "http://localhost:8000"
-    ) -> None:
+    messages: list[str],
+    blocks_to_redact: list[list[int]],
+    blocks_to_extract: list[list[int]],
+    server_url: str = "http://localhost:8000",
+) -> None:
     """Main function to demonstrate secure message sending.
 
     Args:
@@ -46,7 +51,7 @@ def main(
         server_url: The URL of the server (default: http://localhost:8000).
     """
     # Validate that all lists have the same length
-    if not (len(messages) == len(blocks_to_redact) == len(blocks_to_extract)):
+    if not len(messages) == len(blocks_to_redact) == len(blocks_to_extract):
         raise ValueError(
             f"All input lists must have the same length. Got: messages={len(messages)}, "
             f"blocks_to_redact={len(blocks_to_redact)}, blocks_to_extract={len(blocks_to_extract)}"
@@ -61,26 +66,32 @@ def main(
         logger.info("Private key loaded successfully")
     except FileNotFoundError as exc:
         logger.error("Private key not found. Please generate keys first.")
-        raise RuntimeError("Private key not found. Please generate keys first.") from exc
+        raise RuntimeError(
+            "Private key not found. Please generate keys first."
+        ) from exc
 
     # Generate a random AES key
     aes_key = generate_key()
 
     # Process each message
     records = []
-    concatenated_ciphertexts = b''
+    concatenated_ciphertexts = b""
 
-    for message, redact_blocks, extract_blocks in zip(messages, blocks_to_redact, blocks_to_extract):
+    for message, redact_blocks, extract_blocks in zip(
+        messages, blocks_to_redact, blocks_to_extract
+    ):
         aes_associated_data = os.urandom(12)
         ciphertext = encrypt_message(message, aes_key, aes_associated_data)
         concatenated_ciphertexts += ciphertext
 
-        records.append({
-            "aes_ciphertext": base64.b64encode(ciphertext).decode(),
-            "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
-            "blocks_to_redact": redact_blocks,
-            "blocks_to_extract": extract_blocks,
-        })
+        records.append(
+            {
+                "aes_ciphertext": base64.b64encode(ciphertext).decode(),
+                "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
+                "blocks_to_redact": redact_blocks,
+                "blocks_to_extract": extract_blocks,
+            }
+        )
 
     # Sign the concatenated ciphertexts
     signature = key_manager.sign_data(concatenated_ciphertexts)
@@ -94,9 +105,7 @@ def main(
 
     # Send the request to the server
     response = requests.post(
-        f"{server_url}/process-secure-message",
-        json=payload,
-        timeout=30
+        f"{server_url}/process-secure-message", json=payload, timeout=30
     )
 
     if response.status_code == 200:
@@ -106,15 +115,17 @@ def main(
         logger.error("Error: %d", response.status_code)
         logger.error(response.text)
 
+
 if __name__ == "__main__":
     import sys
+
     # Parse command-line arguments
     if len(sys.argv) < 2:
-        url = "http://localhost:8000"
+        URL = "http://localhost:8000"
     else:
-        url = sys.argv[1]
+        URL = sys.argv[1]
 
-    amazon_example = """
+    AMAZON_EXAMPLE = """
     HTTP/2 200 OK
     Content-Type: application/json
     Content-Length: 256
@@ -154,7 +165,9 @@ if __name__ == "__main__":
     amazon_example_blocks_to_redact = [51, 62, 64, 65, 67, 68, 70, 72]
     amazon_example_blocks_to_extract = [51]
 
-    messages = [amazon_example]
-    blocks_to_redact = [amazon_example_blocks_to_redact]
-    blocks_to_extract = [amazon_example_blocks_to_extract]
-    main(messages, blocks_to_redact, blocks_to_extract, url)
+    main(
+        [AMAZON_EXAMPLE],
+        [amazon_example_blocks_to_redact],
+        [amazon_example_blocks_to_extract],
+        URL
+    )

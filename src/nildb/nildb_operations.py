@@ -2,13 +2,16 @@
 
 import asyncio
 import json
-import sys
 import os
-from secretvaults import SecretVaultWrapper, OperationType
+import sys
+
+from secretvaults import OperationType, SecretVaultWrapper
+
 from src.nildb.org_config import org_config
 
 SCHEMA_ID = os.getenv("SCHEMA_ID")
 QUERY_ID = os.getenv("QUERY_ID")
+
 
 async def create_schema() -> str:
     """
@@ -18,7 +21,6 @@ async def create_schema() -> str:
         # Load the schema from schema_match.json
         with open("src/amazon_schema.json", "r", encoding="utf8") as schema_file:
             schema = json.load(schema_file)
-
 
         # Initialize the SecretVaultWrapper instance with the org configuration
         org = SecretVaultWrapper(org_config["nodes"], org_config["org_credentials"])
@@ -32,6 +34,7 @@ async def create_schema() -> str:
     except RuntimeError as error:
         print(f"❌ Failed to use SecretVaultWrapper: {str(error)}")
         sys.exit(1)
+
 
 async def upload_amazon_purchase(purchase: int) -> list[str]:
     """
@@ -48,11 +51,7 @@ async def upload_amazon_purchase(purchase: int) -> list[str]:
         await collection.init()
 
         # Write data to nodes
-        data = [
-            {
-                "purchase": {"%allot": purchase}
-            }
-        ]
+        data = [{"purchase": {"%allot": purchase}}]
         data_written = await collection.write_to_nodes(data)
         # Extract unique created IDs from the results
         new_ids = list(
@@ -68,12 +67,15 @@ async def upload_amazon_purchase(purchase: int) -> list[str]:
         print(f"❌ Failed to use SecretVaultWrapper: {str(error)}")
         sys.exit(1)
 
+
 async def create_sum_query() -> str:
     """
     Main function to initialize the SecretVaultWrapper and create a new schema.
     """
     try:
-        with open("src/amazon_schema_query_sum.json", "r", encoding="utf8") as query_file:
+        with open(
+            "src/amazon_schema_query_sum.json", "r", encoding="utf8"
+        ) as query_file:
             query = json.load(query_file)
 
         # Initialize the SecretVaultWrapper instance with the org configuration
@@ -92,6 +94,7 @@ async def create_sum_query() -> str:
     except RuntimeError as error:
         print(f"❌ Failed to use SecretVaultWrapper: {str(error)}")
         sys.exit(1)
+
 
 async def execute_sum_query():
     """
