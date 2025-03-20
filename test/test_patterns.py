@@ -36,7 +36,7 @@ def test_json_pattern_validation():
 def test_json_pattern_defaults():
     """Test JSON pattern default values."""
     pattern = JsonPattern(pattern_type="json", path="$.value")
-    assert pattern.data_type == "string"  # Default data type
+    assert pattern.data_type == "number"  # Default data type
     assert pattern.should_extract is False  # Default should_extract
     assert pattern.include_children is False  # Default include_children
     assert pattern.preserve_keys is True  # Default preserve_keys

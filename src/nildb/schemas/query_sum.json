@@ -1,0 +1,42 @@
+{
+    "variables": {
+        "origin": {
+            "type": "string",
+            "description": "Filter by data origin (e.g., 'amazon', 'tiktok', '*' for all)"
+        }
+    },
+    "pipeline": [
+        {
+            "$match": {
+                "$expr": {
+                    "$cond": {
+                        "if": { "$eq": ["##origin", "*"] },
+                        "then": true,
+                        "else": { "$eq": ["$description", "##origin"] }
+                    }
+                }
+            }
+        },
+        {
+            "$group": {
+                "_id": null,
+                "total_numbers": { "$sum": "$number.%share" },
+                "count": { "$sum": 1 }
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "sum_number": {
+                    "%share": {
+                        "$mod": [
+                            "$total_numbers",
+                            { "$add": [{ "$pow": [2, 32] }, 15] }
+                        ]
+                    }
+                },
+                "user_count": "$count"
+            }
+        }
+    ]
+}

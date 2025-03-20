@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Amazon Purchases",
+  "title": "Secret Shared Data With Provenance",
   "type": "array",
   "items": {
     "type": "object",
@@ -10,7 +10,7 @@
         "format": "uuid",
         "coerce": true
       },
-      "purchase": {
+      "number": {
         "type": "object",
         "properties": {
           "%share": {
@@ -18,8 +18,20 @@
           }
         },
         "required": ["%share"]
+      },
+      "string": {
+        "type": "object",
+        "properties": {
+          "%share": {
+            "type": "string"
+          }
+        },
+        "required": ["%share"]
+      },
+      "description": {
+        "type": "string"
       }
     },
-    "required": ["_id", "purchase"]
+    "required": ["_id", "number", "description"]
   }
 }

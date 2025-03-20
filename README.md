@@ -37,7 +37,7 @@ The server accepts a payload with multiple records in the following format:
                     // JSONPath expression to locate the data (e.g., "$.total_amount")
                     "path": "$.total_amount",
 
-                    // Type of data to extract - "string" or "number"
+                    // Type of data to extract - "string" or "number" (defaults to "number")
                     "data_type": "number",
 
                     // Whether to extract this value for nilDB storage
@@ -47,7 +47,10 @@ The server accepts a payload with multiple records in the following format:
                     "include_children": false,
 
                     // Whether to preserve JSON keys during redaction
-                    "preserve_keys": true
+                    "preserve_keys": true,
+
+                    // Origin of the data (e.g., "amazon", "tiktok") - used for provenance
+                    "origin": "amazon"
                 }
             ]
         }
@@ -144,9 +147,35 @@ pylint src/
 
 ### Setup nilDB
 After you get your nilDB credentials, copy `.env.sample` to `.env` and store your credentials.
-Then, set up a new nilDB schema and query by running:
+
+The nilDB operations script provides two main operations:
+
+1. Create schema and query:
 ```shell
-python -m src.nildb.nildb_operations
+python -m src.nildb.nildb_operations --create
+```
+This will:
+- Create a new schema for storing data with provenance
+- Create a new sum query that supports filtering by origin
+- Print the new IDs that need to be stored in your `.env` file
+
+2. Execute sum query:
+```shell
+# Query all data
+python -m src.nildb.nildb_operations --query
+
+# Query data from specific origin
+python -m src.nildb.nildb_operations --query amazon
+```
+
+The sum query supports:
+- Filtering by origin (e.g., "amazon", "tiktok")
+- Using "*" to query all data (default)
+- Returns both the sum and count of records for the specified origin
+
+For help with the commands:
+```shell
+python -m src.nildb.nildb_operations -h
 ```
 
 ### Running the Server

@@ -17,7 +17,7 @@ from pydantic import (BaseModel, ConfigDict, Field, ValidationError,
 
 from src.config.key_management import KeyManager
 from src.config.logging import logger
-from src.nildb.nildb_operations import upload_amazon_purchase
+from src.nildb.nildb_operations import upload_to_nildb
 
 # Initialize key manager
 key_manager = KeyManager()
@@ -50,6 +50,9 @@ class JsonPattern(BaseModel):
         False, description="Whether to include nested fields."
     )
     preserve_keys: bool = Field(True, description="Whether to preserve JSON keys.")
+    origin: str = Field(
+        "unknown", description="Origin of the data (e.g., amazon, tiktok)"
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -443,13 +446,14 @@ async def process_secure_message(message: SecureMessage):
             # Process and extract values - use the original plaintext for extraction
             values_for_nildb = []
             original_text = plaintext.decode("utf-8")
+            last_origin = "unknown"  # Default origin if no extractable pattern is found
             for rule in record.patterns:
                 if rule.should_extract:
                     extracted_value = extract_data(original_text, rule)
-                    if (
-                        extracted_value is not None
-                    ):  # Changed from if extracted_value to handle 0 values
+                    if extracted_value is not None:  # Changed from if extracted_value to handle 0 values
                         values_for_nildb.append(extracted_value)
+                        last_origin = rule.origin  # Store the origin from the last extractable pattern
+
             all_extracted_values.extend(values_for_nildb)
 
             # Validate extracted values
@@ -464,7 +468,7 @@ async def process_secure_message(message: SecureMessage):
                 logger.info("- Storing %s to nilDB.", values_for_nildb)
                 record_ids = []
                 for value in values_for_nildb:
-                    record_ids.extend(await upload_amazon_purchase(value))
+                    record_ids.extend(await upload_to_nildb(value, last_origin))
                 all_record_ids.extend(record_ids)
                 logger.info("- Stored values to nilDB with IDs %s", record_ids)
             else:
