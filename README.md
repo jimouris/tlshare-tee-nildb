@@ -92,6 +92,20 @@ The API returns appropriate HTTP status codes:
 
 Note: The `ecdsa_signature` is computed over the concatenation of all `aes_ciphertext` values in the records array.
 
+## Key Generation
+
+Before running the client or server, you need to generate ECDSA keys for signing and verifying messages:
+
+```shell
+python -m src.config.key_management
+```
+
+This will:
+1. Create a `keys` directory if it doesn't exist
+2. Generate a new ECDSA key pair
+3. Save the private key to `keys/private_key.pem`
+4. Save the public key to `keys/public_key.pem`
+
 ## Installation
 
 This project uses `uv` for Python package management. To get started:

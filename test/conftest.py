@@ -1,6 +1,5 @@
 """Test configuration and fixtures."""
 
-import json
 from pathlib import Path
 from typing import Generator
 
@@ -22,23 +21,9 @@ def test_keys_dir(tmp_path: Path) -> Generator[Path, None, None]:
 
 
 @pytest.fixture
-def test_config(tmp_path: Path) -> Generator[Path, None, None]:
-    """Create a temporary config file."""
-    config_path = tmp_path / "test_config.json"
-    config = {"remote_server_url": "http://localhost:8000/public-key"}
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f)
-    yield config_path
-    # Cleanup after tests
-    config_path.unlink()
-
-
-@pytest.fixture
-def key_manager(
-    test_keys_dir: Path, test_config: Path
-) -> Generator[KeyManager, None, None]:
+def key_manager(test_keys_dir: Path) -> Generator[KeyManager, None, None]:
     """Create a KeyManager instance for testing."""
-    manager = KeyManager(key_dir=str(test_keys_dir), config_path=str(test_config))
+    manager = KeyManager(key_dir=str(test_keys_dir))
     yield manager
     # Cleanup after tests
     if manager.public_key_path.exists():

@@ -458,9 +458,9 @@ async def process_secure_message(message: SecureMessage):
 
             # Validate extracted values
             for value in values_for_nildb:
-                if not isinstance(value, int):
+                if not isinstance(value, (int, str)):
                     raise ValueError(
-                        f"Value to store in nilDB is not an integer: {value}"
+                        f"Value to store in nilDB must be an integer or string: {value}"
                     )
 
             # Store values in nildb if not a test

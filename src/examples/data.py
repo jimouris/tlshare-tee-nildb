@@ -21,6 +21,32 @@ toy_example_patterns = [
     }
 ]
 
+TOY_STRING_EXAMPLE = """HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 80
+
+{
+    "username": "alice",
+    "message": "Hello, World!",
+    "timestamp": "2025-03-20T12:34:56Z"
+}
+"""
+
+toy_string_example_patterns = [
+    {
+        "pattern_type": "json",
+        "path": "$.message",
+        "data_type": "string",
+        "should_extract": True,
+        "origin": "toy-string",
+    },
+    {
+        "pattern_type": "json",
+        "path": "$.username",
+        "data_type": "string",
+    }
+]
+
 AMAZON_EXAMPLE = """HTTP/2 200 OK
 Content-Type: application/json
 Content-Length: 256
@@ -143,6 +169,7 @@ tiktok_example_patterns = [
 # Dictionary mapping example names to their data and patterns
 EXAMPLES = {
     "toy": (TOY_EXAMPLE, toy_example_patterns),
+    "toy-string": (TOY_STRING_EXAMPLE, toy_string_example_patterns),
     "amazon": (AMAZON_EXAMPLE, amazon_example_patterns),
     "tiktok": (TIKTOK_EXAMPLE, tiktok_example_patterns),
 }

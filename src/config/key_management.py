@@ -1,9 +1,7 @@
 """Key management module for handling cryptographic keys and signatures."""
 
 from pathlib import Path
-from typing import Optional
 
-import requests
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -11,16 +9,13 @@ from cryptography.hazmat.primitives.asymmetric.utils import (
     decode_dss_signature, encode_dss_signature)
 from cryptography.hazmat.primitives.hashes import SHA256
 
-from .config import Config
 from .logging import logger
 
 
 class KeyManager:
     """Manages cryptographic keys and signatures for secure communication."""
 
-    def __init__(
-        self, key_dir: str = "keys", config_path: str = "src/config/config.json"
-    ):
+    def __init__(self, key_dir: str = "keys"):
         """Initialize the key manager.
 
         Args:
@@ -30,8 +25,6 @@ class KeyManager:
         self.key_dir.mkdir(exist_ok=True)
         self.private_key_path = self.key_dir / "private_key.pem"
         self.public_key_path = self.key_dir / "public_key.pem"
-        self.remote_public_key_path = self.key_dir / "public_key.pem"
-        self.config = Config(config_path)
 
     def generate_keys(self) -> None:
         """Generate a new key pair and save them to disk."""
@@ -125,30 +118,6 @@ class KeyManager:
             return False
         except Exception as exc:
             raise RuntimeError(f"Signature verification failed: {str(exc)}") from exc
-
-    def fetch_remote_public_key(
-        self, remote_url: str
-    ) -> Optional[ec.EllipticCurvePublicKey]:
-        """Fetch the remote public key from a URL.
-
-        Args:
-            remote_url: URL to fetch the public key from
-
-        Returns:
-            The remote public key if successful, None otherwise
-        """
-        try:
-            response = requests.get(remote_url, timeout=30)
-            response.raise_for_status()
-
-            with open(self.remote_public_key_path, "wb") as f:
-                f.write(response.content)
-            logger.info("Remote public key saved to %s", self.remote_public_key_path)
-
-            return serialization.load_pem_public_key(response.content)
-        except Exception as exc:
-            logger.error("Failed to fetch public key: %s", str(exc))
-            raise RuntimeError(f"Failed to fetch public key: {str(exc)}") from exc
 
 
 def generate_and_save_keys():
