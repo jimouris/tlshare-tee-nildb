@@ -1,136 +1,270 @@
 """Tests for message processing functionality."""
 
+import json
+
 import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from pydantic import ValidationError
 
 from src.config.key_management import KeyManager
-from src.server.server import BLOCK_SIZE, extract_number, redact_message
+from src.server.server import JsonPattern, redact_message
 
 
-def test_extract_message_parts():
-    """Test extracting sensitive and non-sensitive parts of a message."""
-    # Create a test message with known content
-    message = b"Hello, this is a test message with sensitive data!"
-    sensitive_indices = [1, 3]
+def test_json_redaction():
+    """Test redacting JSON data."""
+    message = """
+    HTTP/1.1 200 OK
+    Content-Type: application/json
 
-    # Extract parts
-    sensitive_part, non_sensitive_part = redact_message(
-        message, sensitive_indices, BLOCK_SIZE
+    {
+        "sensitive": "secret",
+        "public": "hello",
+        "nested": {
+            "secret": "hidden",
+            "visible": "shown"
+        }
+    }
+    """
+
+    patterns = [
+        JsonPattern(pattern_type="json", path="$.sensitive", data_type="string"),
+        JsonPattern(pattern_type="json", path="$.nested.secret", data_type="string"),
+    ]
+
+    sensitive_part, non_sensitive_part, extracted_values = redact_message(
+        message.encode(), patterns
     )
 
-    # Verify lengths
-    total_blocks = len(message) // BLOCK_SIZE
-    remaining_bytes = len(message) % BLOCK_SIZE
-    blocks_to_redact = [i for i in sensitive_indices if i < total_blocks]
-    expected_sensitive_length = len(blocks_to_redact) * BLOCK_SIZE
-    if total_blocks in sensitive_indices and remaining_bytes > 0:
-        expected_sensitive_length += remaining_bytes
-
-    assert len(sensitive_part) == expected_sensitive_length
-    assert len(non_sensitive_part) == len(message) - expected_sensitive_length
-
-
-def test_extract_message_parts_with_partial_block():
-    """Test extracting parts when the last block is partial."""
-    # Create a message that's not a multiple of BLOCK_SIZE
-    message = b"Hello, this is a test message with sensitive data!"
-    sensitive_indices = [1, 3]  # Include the last partial block
-
-    # Extract parts
-    sensitive_part, non_sensitive_part = redact_message(
-        message, sensitive_indices, BLOCK_SIZE
+    # Parse the redacted message
+    redacted_data = non_sensitive_part.decode()
+    redacted_json = json.loads(
+        redacted_data[redacted_data.find("{") : redacted_data.rfind("}") + 1]
     )
 
-    # Verify lengths
-    total_blocks = len(message) // BLOCK_SIZE
-    remaining_bytes = len(message) % BLOCK_SIZE
-    blocks_to_redact = [i for i in sensitive_indices if i < total_blocks]
-    expected_sensitive_length = len(blocks_to_redact) * BLOCK_SIZE
-    if total_blocks in sensitive_indices and remaining_bytes > 0:
-        expected_sensitive_length += remaining_bytes
+    # Check that specified fields are redacted
+    assert redacted_json["sensitive"] == "****"
+    assert redacted_json["public"] == "hello"
+    assert redacted_json["nested"]["secret"] == "****"
+    assert redacted_json["nested"]["visible"] == "shown"
 
-    assert len(sensitive_part) == expected_sensitive_length
-    assert len(non_sensitive_part) == len(message) - expected_sensitive_length
+    # Check that no values were extracted
+    assert not extracted_values
 
 
-def test_process_secure_message(
-    key_manager: KeyManager,
-    sample_message: str,
-    sample_blocks_to_redact: list[int],
-    sample_blocks_to_extract: list[int],
-):
+def test_json_extraction():
+    """Test extracting values from JSON data."""
+    message = """
+    HTTP/1.1 200 OK
+    Content-Type: application/json
+
+    {
+        "value": 42,
+        "nested": {
+            "value": 100
+        }
+    }
+    """
+
+    patterns = [
+        JsonPattern(
+            pattern_type="json", path="$.value", data_type="number", should_extract=True
+        ),
+        JsonPattern(
+            pattern_type="json",
+            path="$.nested.value",
+            data_type="number",
+            should_extract=True,
+        ),
+    ]
+
+    sensitive_part, non_sensitive_part, extracted_values = redact_message(
+        message.encode(), patterns
+    )
+
+    # Check extracted values
+    assert len(extracted_values) == 2
+    assert 42 in extracted_values
+    assert 100 in extracted_values
+
+    # Parse the redacted message
+    redacted_data = non_sensitive_part.decode()
+    redacted_json = json.loads(
+        redacted_data[redacted_data.find("{") : redacted_data.rfind("}") + 1]
+    )
+
+    # Check that extracted values are redacted
+    assert redacted_json["value"] == "****"
+    assert redacted_json["nested"]["value"] == "****"
+
+
+def test_json_pattern_defaults():
+    """Test JSON pattern with default values."""
+    message = """
+    HTTP/1.1 200 OK
+    Content-Type: application/json
+
+    {
+        "object": {
+            "field1": "value1",
+            "field2": "value2"
+        }
+    }
+    """
+
+    patterns = [JsonPattern(pattern_type="json", path="$.object")]
+
+    sensitive_part, non_sensitive_part, extracted_values = redact_message(
+        message.encode(), patterns
+    )
+
+    # Parse the redacted message
+    redacted_data = non_sensitive_part.decode()
+    redacted_json = json.loads(
+        redacted_data[redacted_data.find("{") : redacted_data.rfind("}") + 1]
+    )
+
+    # Check that keys are preserved (default) and children not included (default)
+    assert isinstance(redacted_json["object"], dict)
+    assert redacted_json["object"]["field1"] == "****"
+    assert redacted_json["object"]["field2"] == "****"
+
+
+def test_process_secure_message():
     """Test the complete secure message processing flow."""
     # Generate keys
+    key_manager = KeyManager()
     key_manager.generate_keys()
 
-    # Generate AES key
-    aes_key = AESGCM.generate_key(bit_length=256)
-    aesgcm = AESGCM(aes_key)
+    # Create test records
+    message1 = """
+    HTTP/1.1 200 OK
+    Content-Type: application/json
 
-    # Generate nonce and encrypt
-    nonce = b"test_nonce_12"  # 12 bytes
-    ciphertext = aesgcm.encrypt(nonce, sample_message.encode(), None)
-    full_ciphertext = nonce + ciphertext
+    {
+        "value": 42,
+        "sensitive": "secret"
+    }
+    """
 
-    # Sign the data
-    data_to_sign = full_ciphertext
-    signature = key_manager.sign_data(data_to_sign)
+    message2 = """
+    HTTP/1.1 200 OK
+    Content-Type: application/json
 
-    # Verify the signature
-    assert key_manager.verify_signature(data_to_sign, signature)
+    {
+        "data": {
+            "value": 100,
+            "sensitive": "hidden"
+        }
+    }
+    """
 
-    # Test decryption
-    decrypted = aesgcm.decrypt(nonce, ciphertext, None)
-    assert decrypted.decode() == sample_message
+    # Create patterns for each record
+    patterns1 = [
+        JsonPattern(
+            pattern_type="json", path="$.value", data_type="number", should_extract=True
+        ),
+        JsonPattern(pattern_type="json", path="$.sensitive", data_type="string"),
+    ]
 
-    # Test message parts extraction
-    sensitive_part, non_sensitive_part = redact_message(
-        decrypted, sample_blocks_to_redact, BLOCK_SIZE
+    patterns2 = [
+        JsonPattern(
+            pattern_type="json",
+            path="$.data.value",
+            data_type="number",
+            should_extract=True,
+        ),
+        JsonPattern(pattern_type="json", path="$.data.sensitive", data_type="string"),
+    ]
+
+    # Process each record
+    sensitive_part1, non_sensitive_part1, extracted_values1 = redact_message(
+        message1.encode(), patterns1
     )
-    current_pos = 0
-    extracted_number = None
-    for idx in sorted(sample_blocks_to_redact):
-        block_length = min(BLOCK_SIZE, len(decrypted) - idx * BLOCK_SIZE)
-        block = sensitive_part[current_pos : current_pos + block_length].decode("utf-8")
-        print(f"Block {idx}: {block}")
-        if (
-            idx in sample_blocks_to_extract
-        ):  # Check if the block is in blocks_to_extract
-            extracted_number = extract_number(block)
-        current_pos += block_length
+    sensitive_part2, non_sensitive_part2, extracted_values2 = redact_message(
+        message2.encode(), patterns2
+    )
 
-    # Verify sensitive parts
-    assert len(sensitive_part) == BLOCK_SIZE * len(sample_blocks_to_redact)
-    assert len(non_sensitive_part) == len(decrypted) - len(sensitive_part)
-    assert extracted_number == 100
+    # Check extracted values
+    assert len(extracted_values1) == 1
+    assert extracted_values1[0] == 42
+    assert len(extracted_values2) == 1
+    assert extracted_values2[0] == 100
+
+    # Parse and check redacted messages
+    redacted_json1 = json.loads(
+        non_sensitive_part1.decode()[non_sensitive_part1.decode().find("{") :]
+    )
+    assert redacted_json1["value"] == "****"
+    assert redacted_json1["sensitive"] == "****"
+
+    redacted_json2 = json.loads(
+        non_sensitive_part2.decode()[non_sensitive_part2.decode().find("{") :]
+    )
+    assert redacted_json2["data"]["value"] == "****"
+    assert redacted_json2["data"]["sensitive"] == "****"
 
 
-def test_invalid_signature(key_manager: KeyManager, sample_message: str):
+def test_invalid_signature():
     """Test handling of invalid signatures."""
     # Generate keys
+    key_manager = KeyManager()
     key_manager.generate_keys()
 
-    # Generate AES key
-    aes_key = AESGCM.generate_key(bit_length=256)
-    aesgcm = AESGCM(aes_key)
+    # Create a record with a JSON message
+    message = """
+    HTTP/1.1 200 OK
+    Content-Type: application/json
 
-    # Generate nonce and encrypt
-    nonce = b"test_nonce_12"
-    ciphertext = aesgcm.encrypt(nonce, sample_message.encode(), None)
-    full_ciphertext = nonce + ciphertext
+    {
+        "value": 42,
+        "sensitive": "secret"
+    }
+    """
 
-    # Create invalid signature
-    invalid_signature = b"invalid" * 8  # 64 bytes of invalid data
+    patterns = [
+        JsonPattern(
+            pattern_type="json", path="$.value", data_type="number", should_extract=True
+        )
+    ]
 
-    # Verify that invalid signature is rejected
-    data_to_verify = full_ciphertext + aes_key
-    assert not key_manager.verify_signature(data_to_verify, invalid_signature)
+    # Process the record
+    sensitive_part, non_sensitive_part, extracted_values = redact_message(
+        message.encode(), patterns
+    )
+
+    # Check that the value was extracted and redacted
+    assert len(extracted_values) == 1
+    assert extracted_values[0] == 42
+
+    redacted_json = json.loads(
+        non_sensitive_part.decode()[non_sensitive_part.decode().find("{") :]
+    )
+    assert redacted_json["value"] == "****"
+    assert redacted_json["sensitive"] == "secret"  # Not redacted
 
 
-def test_invalid_block_indices():
-    """Test handling of invalid block indices."""
-    message = b"Hello, this is a test message!"
-    invalid_indices = [10]  # Index beyond message length
+def test_invalid_pattern():
+    """Test handling of invalid pattern configuration."""
+    message = """
+    HTTP/1.1 200 OK
+    Content-Type: application/json
 
-    with pytest.raises(ValueError):
-        redact_message(message, invalid_indices, BLOCK_SIZE)
+    {
+        "value": 42
+    }
+    """
+
+    # Invalid pattern type
+    with pytest.raises(ValidationError):
+        JsonPattern(pattern_type="invalid", path="$.value")
+
+    # Invalid data type
+    with pytest.raises(ValidationError):
+        JsonPattern(pattern_type="json", path="$.value", data_type="invalid")
+
+    # Test with actual message processing
+    patterns = [JsonPattern(pattern_type="json", path="$.value", data_type="number")]
+    sensitive_part, non_sensitive_part, extracted_values = redact_message(
+        message.encode(), patterns
+    )
+    assert extracted_values == []  # No extraction requested

@@ -2,15 +2,18 @@
 
 import contextlib
 import datetime
+import json
 import re
 from base64 import b64decode
-from typing import List
+from typing import List, Literal
 
+import jsonpath_ng
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import (BaseModel, ConfigDict, Field, ValidationError,
+                      field_validator)
 
 from src.config.key_management import KeyManager
 from src.config.logging import logger
@@ -19,43 +22,44 @@ from src.nildb.nildb_operations import upload_amazon_purchase
 # Initialize key manager
 key_manager = KeyManager()
 
-# Constants
-BLOCK_SIZE = 16  # AES block size in bytes
-
 
 @contextlib.asynccontextmanager
-async def lifespan(_: FastAPI):
-    """Handle startup and shutdown events."""
+async def lifespan(fastapi_app: FastAPI):
+    """Lifespan context manager for FastAPI application."""
     # Startup
-    logger.info("Server starting up...")
-    try:
-        # Check if keys exist, generate them if they don't
-        if not key_manager.public_key_path.exists():
-            logger.info("Keys not found. Generating new key pair...")
-            key_manager.generate_keys()
-            logger.info("New key pair generated successfully")
-
-        # Verify public key exists
-        public_key = key_manager.load_public_key()
-        logger.info("Public key loaded successfully")
-        # Log public key details
-        public_numbers = public_key.public_numbers()
-        logger.info("Public key details:")
-        logger.info("- Curve: %s", public_numbers.curve.name)
-        logger.info("- X coordinate: %s", hex(public_numbers.x))
-        logger.info("- Y coordinate: %s", hex(public_numbers.y))
-    except Exception as exc:
-        logger.error("Error during startup: %s", str(exc))
-        raise RuntimeError("Server startup failed") from exc
-
-    logger.info("Available endpoints:")
-    logger.info("- GET /")
-    logger.info("- POST /process-secure-message")
-
+    logger.info("Starting up server...")
+    fastapi_app.state.startup_time = datetime.datetime.now()
     yield
-
     # Shutdown
-    logger.info("Server shutting down...")
+    uptime = datetime.datetime.now() - fastapi_app.state.startup_time
+    logger.info("Shutting down server after %s uptime", uptime)
+
+
+class JsonPattern(BaseModel):
+    """Pattern for JSON operations (both redaction and extraction)."""
+
+    pattern_type: Literal["json"] = Field(..., description="Type of pattern")
+    path: str = Field(..., description="JSONPath expression to locate the data")
+    data_type: Literal["string", "number"] = Field(
+        "number", description="Type of data (string/number)"
+    )
+    should_extract: bool = Field(
+        False, description="Whether to extract this value for nilDB storage."
+    )
+    include_children: bool = Field(
+        False, description="Whether to include nested fields."
+    )
+    preserve_keys: bool = Field(True, description="Whether to preserve JSON keys.")
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("data_type")
+    @classmethod
+    def validate_data_type(cls, v: str) -> str:
+        """Validate data type is either string or number."""
+        if v not in ["string", "number"]:
+            raise ValidationError("data_type must be either 'string' or 'number'")
+        return v
 
 
 class Record(BaseModel):
@@ -65,23 +69,9 @@ class Record(BaseModel):
     aes_associated_data: bytes = Field(
         ..., description="Base64 encoded AES associated data"
     )
-    blocks_to_redact: List[int] = Field(
-        ..., description="List of indices for sensitive blocks"
+    patterns: List[JsonPattern] = Field(
+        ..., description="List of patterns for redaction and extraction"
     )
-    blocks_to_extract: List[int] = Field(
-        default_factory=list, description="List of block indices to extract data from"
-    )
-
-    @field_validator("blocks_to_extract")
-    @classmethod
-    def validate_blocks_to_extract(
-        cls, v: List[int], info: ValidationInfo
-    ) -> List[int]:
-        """Validate that blocks_to_extract is a subset of blocks_to_redact."""
-        blocks_to_redact = info.data.get("blocks_to_redact", [])
-        if not all(block in blocks_to_redact for block in v):
-            raise ValueError("blocks_to_extract must be a subset of blocks_to_redact")
-        return v
 
     @field_validator("aes_ciphertext", "aes_associated_data", mode="before")
     @classmethod
@@ -89,9 +79,188 @@ class Record(BaseModel):
         """Decode base64 string to bytes."""
         try:
             return b64decode(v)
-        except Exception as exc:
+        except (ValueError, TypeError) as exc:
             logger.error("Base64 decoding failed: %s", str(exc))
             raise ValueError("Invalid base64 encoding") from exc
+
+    @field_validator("patterns", mode="before")
+    @classmethod
+    def validate_patterns(cls, v: List[dict]) -> List[dict]:
+        """Validate patterns and convert validation errors to 400 status code."""
+        try:
+            # First validate that each pattern has a pattern_type
+            for pattern in v:
+                if not isinstance(pattern, dict):
+                    raise HTTPException(
+                        status_code=400, detail="Pattern must be a dictionary"
+                    )
+                if "pattern_type" not in pattern:
+                    raise HTTPException(
+                        status_code=400, detail="Pattern must have a pattern_type"
+                    )
+                if pattern["pattern_type"] != "json":
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid pattern type: {pattern['pattern_type']}. Must be 'json'.",
+                    )
+            return v
+        except HTTPException as exc:
+            # Re-raise HTTPException without wrapping
+            raise exc
+        except (ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def extract_json_from_http_response(data: str) -> str:
+    """Extract JSON body from HTTP response.
+
+    Args:
+        data: The HTTP response containing JSON
+
+    Returns:
+        str: The JSON body
+    """
+    try:
+        # Find the first occurrence of '{'
+        start = data.find("{")
+        if start == -1:
+            return data
+
+        # Find the matching closing brace
+        count = 1
+        for i in range(start + 1, len(data)):
+            if data[i] == "{":
+                count += 1
+            elif data[i] == "}":
+                count -= 1
+                if count == 0:
+                    return data[start : i + 1]
+        return data
+    except (ValueError, IndexError) as exc:
+        logger.error("Failed to extract JSON from HTTP response: %s", str(exc))
+        return data
+
+
+def apply_pattern(
+    data: str, pattern: JsonPattern
+) -> tuple[str, List[int], str | int | None]:
+    """Apply a pattern to the data and return the redacted data and extracted value.
+
+    Args:
+        data: The data to process
+        pattern: The pattern to apply
+
+    Returns:
+        Tuple of (processed_data, empty list for compatibility, extracted value)
+    """
+    try:
+        # Extract JSON from HTTP response if needed
+        json_str = extract_json_from_http_response(data)
+        json_start = data.find(json_str)
+        json_end = json_start + len(json_str)
+
+        # Parse the data as JSON
+        try:
+            json_data = json.loads(json_str)
+        except json.JSONDecodeError as exc:
+            logger.error("Failed to parse JSON: %s", str(exc))
+            return data, [], None
+
+        # Find the JSON path
+        jsonpath_expr = jsonpath_ng.parse(pattern.path)
+        matches = jsonpath_expr.find(json_data)
+
+        if not matches:
+            logger.warning("No matches found for path: %s", pattern.path)
+            return data, [], None
+
+        # Extract value before redacting (only if should_extract is True)
+        extracted_value = None
+        if pattern.should_extract:
+            match = matches[0]  # Take first match for extraction
+            try:
+                if pattern.data_type == "number":
+                    # Handle both string numbers and actual numbers
+                    if isinstance(match.value, (int, float)):
+                        extracted_value = int(match.value)
+                    else:
+                        extracted_value = int(float(str(match.value).strip()))
+                else:
+                    extracted_value = str(match.value)
+            except (ValueError, TypeError) as exc:
+                logger.error("Failed to extract value: %s", str(exc))
+
+        # Redact values while preserving structure
+        for match in matches:
+            if pattern.include_children:
+                # If include_children is True, redact all nested values
+                if isinstance(match.value, dict):
+                    for key in match.value:
+                        match.value[key] = "****"
+                elif isinstance(match.value, list):
+                    match.value[:] = ["****"] * len(match.value)
+                else:
+                    match.full_path.update(json_data, "****")
+            else:
+                # If include_children is False (default)
+                if isinstance(match.value, dict):
+                    if pattern.preserve_keys:
+                        # Create a new dict with redacted values
+                        redacted_dict = {key: "****" for key in match.value}
+                        match.full_path.update(json_data, redacted_dict)
+                    else:
+                        match.full_path.update(json_data, "****")
+                else:
+                    match.full_path.update(json_data, "****")
+
+        # Replace the JSON in the original data
+        redacted_json = json.dumps(json_data, indent=2)
+        redacted_data = data[:json_start] + redacted_json + data[json_end:]
+
+        return redacted_data, [], extracted_value
+
+    except (ValueError, TypeError, AttributeError) as exc:
+        logger.error("Error applying pattern: %s", str(exc))
+        return data, [], None
+
+
+def redact_message(
+    plaintext: bytes,
+    patterns: List[JsonPattern],
+    *,  # Force keyword arguments after this
+    _legacy_block_size: int | None = None,  # For backward compatibility
+) -> tuple[bytes, bytes, List[int | str]]:
+    """
+    Apply patterns to the message and return sensitive and non-sensitive parts, plus extracted values.
+
+    Args:
+        plaintext: The decrypted message bytes
+        patterns: List of patterns for redaction and extraction
+        _legacy_block_size: Ignored, kept for backward compatibility
+
+    Returns:
+        Tuple of (sensitive_part, non_sensitive_part, extracted_values) as (bytes, bytes, list)
+    """
+    # Convert bytes to string for processing
+    data = plaintext.decode("utf-8")
+    extracted_values = []
+    redacted_data = data
+
+    # Apply each pattern
+    for pattern in patterns:
+        try:
+            new_data, _, extracted_value = apply_pattern(redacted_data, pattern)
+            if (
+                new_data != redacted_data
+            ):  # Only update if the pattern changed something
+                redacted_data = new_data
+            if extracted_value is not None:
+                extracted_values.append(extracted_value)
+        except (ValueError, TypeError) as exc:
+            logger.error("Error applying pattern: %s", str(exc))
+            continue
+
+    return plaintext, redacted_data.encode(), extracted_values
 
 
 class SecureMessage(BaseModel):
@@ -135,83 +304,54 @@ async def root():
     return RedirectResponse(url="/docs", status_code=307, headers={"Location": "/docs"})
 
 
-def redact_message(
-    plaintext: bytes, blocks_to_redact: List[int], block_size: int
-) -> tuple[bytes, bytes]:
-    """
-    Extract sensitive and non-sensitive parts of the message based on block indices.
-
-    Args:
-        plaintext: The decrypted message bytes
-        sensitive_indices: List of block indices that contain sensitive data
-        block_size: Size of each block in bytes
-
-    Returns:
-        Tuple of (sensitive_part, non_sensitive_part) as bytes
-
-    Raises:
-        ValueError: If any block index is beyond the message length
-    """
-    # Validate block indices
-    total_blocks = (len(plaintext) + block_size - 1) // block_size  # Ceiling division
-    max_block_index = total_blocks - 1
-
-    invalid_indices = [idx for idx in blocks_to_redact if idx > max_block_index]
-    if invalid_indices:
-        raise ValueError(
-            f"Invalid block indices: {invalid_indices}. Maximum valid index is {max_block_index}"
-        )
-
-    # Sort indices to ensure we process blocks in order
-    sorted_indices = sorted(blocks_to_redact)
-
-    # Initialize lists to store block indices
-    blocks_to_redact = []
-    non_blocks_to_redact = []
-
-    # Distribute complete blocks into sensitive and non-sensitive
-    for i in range(total_blocks):
-        if i in sorted_indices:
-            blocks_to_redact.append(i)
-        else:
-            non_blocks_to_redact.append(i)
-
-    # Extract the actual data for each part
-    sensitive_data = b""
-    non_sensitive_data = b""
-
-    # Process complete blocks
-    for i in range(total_blocks):
-        start = i * block_size
-        end = min(start + block_size, len(plaintext))
-        block_data = plaintext[start:end]
-        if i in blocks_to_redact:
-            sensitive_data += block_data
-        else:
-            non_sensitive_data += block_data
-
-    return sensitive_data, non_sensitive_data
-
-
 def extract_number(text: str):
     """Extract a number as an integer from a string."""
     numbers = [int(float(num)) for num in re.findall(r"\d+\.\d+|\d+", text)]
     return numbers[0] if len(numbers) == 1 else numbers
 
 
+def extract_data(text: str, rule: JsonPattern) -> str | int | None:
+    """Extract data according to the extraction rule."""
+    try:
+        # Extract JSON from HTTP response first
+        json_str = extract_json_from_http_response(text)
+        json_data = json.loads(json_str)
+
+        extracted_value = None
+        matches = jsonpath_ng.parse(rule.path).find(json_data)
+        if matches:
+            match = matches[0]
+            if isinstance(match.value, (int, float)):
+                extracted_value = int(match.value)
+            elif isinstance(match.value, str):
+                extracted_value = (
+                    int(float(match.value))
+                    if rule.data_type == "number"
+                    else match.value
+                )
+        return extracted_value
+    except (ValueError, TypeError, json.JSONDecodeError, AttributeError) as exc:
+        logger.error("Failed to extract JSON value: %s", str(exc))
+        return None
+
+
 @app.post("/process-secure-message")
 async def process_secure_message(message: SecureMessage):
     """
-    Process a secure message containing AES ciphertext, key, ECDSA signature, and sensitive block indices.
+    Process a secure message containing AES ciphertext, key, ECDSA signature, and patterns.
 
     Args:
         message: SecureMessage object containing encrypted data and metadata
 
     Returns:
-        Dict with status "success" if processing is successful
+        Dict containing:
+        - status: "success" if processing is successful
+        - redacted_messages: List of redacted messages (sensitive parts replaced with ****)
+        - extracted_values: List of values extracted and stored in nilDB
+        - record_ids: List of nilDB record IDs where values were stored (if not in test mode)
 
     Raises:
-        HTTPException: If signature verification fails, decryption fails, or block indices are invalid
+        HTTPException: If signature verification fails, decryption fails, or patterns are invalid
     """
     request_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     logger.info("Processing secure message [request_id: %s]", request_id)
@@ -237,7 +377,7 @@ async def process_secure_message(message: SecureMessage):
             logger.info(
                 "Signature verification successful [request_id: %s]", request_id
             )
-        except Exception as exc:
+        except (ValueError, TypeError, InvalidTag) as exc:
             logger.error(
                 "Signature verification error [request_id: %s]: %s",
                 request_id,
@@ -254,6 +394,9 @@ async def process_secure_message(message: SecureMessage):
 
         # Process each record
         all_record_ids = []
+        all_redacted_messages = []
+        all_extracted_values = []
+
         for i, record in enumerate(message.records):
             logger.info("Processing record %d [request_id: %s]", i, request_id)
 
@@ -276,43 +419,40 @@ async def process_secure_message(message: SecureMessage):
                     status_code=400, detail=f"Invalid ciphertext in record {i}"
                 ) from exc
 
-            sensitive_part, non_sensitive_part = redact_message(
-                plaintext, record.blocks_to_redact, BLOCK_SIZE
+            # Apply patterns and get sensitive/non-sensitive parts
+            sensitive_part, non_sensitive_part, extracted_values = redact_message(
+                plaintext, record.patterns
             )
-
-            # Create the complete message with sensitive parts marked as asterisks
-            complete_message = list(plaintext.decode("utf-8"))
-            for idx in sorted(record.blocks_to_redact):
-                start_pos = idx * BLOCK_SIZE
-                end_pos = min(start_pos + BLOCK_SIZE, len(complete_message))
-                # Replace each character in the sensitive block with an asterisk
-                complete_message[start_pos:end_pos] = ["*"] * (end_pos - start_pos)
 
             logger.info("Message parts [request_id: %s]:", request_id)
             logger.info("- Sensitive part length: %d bytes", len(sensitive_part))
             logger.info(
                 "- Non-sensitive part length: %d bytes", len(non_sensitive_part)
             )
-            logger.info("- Sensitive parts:")
+            logger.info("- Extracted values: %s", extracted_values)
 
-            # Process blocks and extract values
-            current_pos = 0
+            # Store the redacted message
+            try:
+                all_redacted_messages.append(non_sensitive_part.decode("utf-8"))
+                logger.info("Redacted message for record %d:", i)
+                logger.info(non_sensitive_part.decode("utf-8"))
+            except (UnicodeDecodeError, AttributeError) as exc:
+                logger.error("Error creating redacted message: %s", str(exc))
+                all_redacted_messages.append("<error creating redacted message>")
+
+            # Process and extract values - use the original plaintext for extraction
             values_for_nildb = []
-            for idx in sorted(record.blocks_to_redact):
-                block_length = min(BLOCK_SIZE, len(plaintext) - idx * BLOCK_SIZE)
-                block = sensitive_part[current_pos : current_pos + block_length].decode(
-                    "utf-8"
-                )
-                if (
-                    idx in record.blocks_to_extract
-                ):  # Check if the block is in blocks_to_extract
-                    values_for_nildb.append(extract_number(block))
-                logger.info("  Block %d: %s", idx, block.replace("\n", ""))
-                current_pos += block_length
-            logger.info(
-                "- Complete message with sensitive parts: %s", "".join(complete_message)
-            )
+            original_text = plaintext.decode("utf-8")
+            for rule in record.patterns:
+                if rule.should_extract:
+                    extracted_value = extract_data(original_text, rule)
+                    if (
+                        extracted_value is not None
+                    ):  # Changed from if extracted_value to handle 0 values
+                        values_for_nildb.append(extracted_value)
+            all_extracted_values.extend(values_for_nildb)
 
+            # Validate extracted values
             for value in values_for_nildb:
                 if not isinstance(value, int):
                     raise ValueError(
@@ -335,7 +475,12 @@ async def process_secure_message(message: SecureMessage):
         else:
             logger.info("Skipping nilDB storage (test mode)")
 
-        return {"status": "success"}
+        return {
+            "status": "success",
+            "redacted_messages": all_redacted_messages,
+            "extracted_values": all_extracted_values,
+            "record_ids": all_record_ids if not is_test else None,
+        }
 
     except HTTPException:
         raise

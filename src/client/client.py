@@ -1,13 +1,16 @@
 """Client for sending secure messages to the TEE server."""
 
+import argparse
 import base64
 import os
+from typing import Any, Dict, List, Tuple
 
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from src.config.key_management import KeyManager
 from src.config.logging import logger
+from src.examples.data import EXAMPLES
 
 
 def generate_key() -> bytes:
@@ -25,6 +28,7 @@ def encrypt_message(message: str, key: bytes, associated_data: bytes) -> bytes:
     Args:
         message: The message to encrypt
         key: The AES key to use for encryption
+        associated_data: The associated data for AES-GCM
 
     Returns:
         bytes: The encrypted message with nonce prepended
@@ -36,25 +40,23 @@ def encrypt_message(message: str, key: bytes, associated_data: bytes) -> bytes:
     return nonce + ciphertext
 
 
-def main(
-    messages: list[str],
-    blocks_to_redact: list[list[int]],
-    blocks_to_extract: list[list[int]],
+def process_messages(
+    messages: List[str],
+    patterns: List[List[Dict[str, Any]]],
     server_url: str = "http://localhost:8000",
 ) -> None:
-    """Main function to demonstrate secure message sending.
+    """Process and send messages to the server.
 
     Args:
         messages: List of messages to send.
-        blocks_to_redact: List of lists of indices for sensitive blocks.
-        blocks_to_extract: List of lists of block indices to extract data from.
+        patterns: List of lists of patterns for redaction and extraction.
         server_url: The URL of the server (default: http://localhost:8000).
     """
     # Validate that all lists have the same length
-    if not len(messages) == len(blocks_to_redact) == len(blocks_to_extract):
+    if len(messages) != len(patterns):
         raise ValueError(
-            f"All input lists must have the same length. Got: messages={len(messages)}, "
-            f"blocks_to_redact={len(blocks_to_redact)}, blocks_to_extract={len(blocks_to_extract)}"
+            f"Messages and patterns must have the same length. Got: messages={len(messages)}, "
+            f"patterns={len(patterns)}"
         )
 
     # Initialize key manager
@@ -77,21 +79,17 @@ def main(
     records = []
     concatenated_ciphertexts = b""
 
-    for message, redact_blocks, extract_blocks in zip(
-        messages, blocks_to_redact, blocks_to_extract
-    ):
+    for i, (message, message_patterns) in enumerate(zip(messages, patterns)):
         aes_associated_data = os.urandom(12)
         ciphertext = encrypt_message(message, aes_key, aes_associated_data)
         concatenated_ciphertexts += ciphertext
 
-        records.append(
-            {
-                "aes_ciphertext": base64.b64encode(ciphertext).decode(),
-                "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
-                "blocks_to_redact": redact_blocks,
-                "blocks_to_extract": extract_blocks,
-            }
-        )
+        record = {
+            "aes_ciphertext": base64.b64encode(ciphertext).decode(),
+            "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
+            "patterns": message_patterns,
+        }
+        records.append(record)
 
     # Sign the concatenated ciphertexts
     signature = key_manager.sign_data(concatenated_ciphertexts)
@@ -111,63 +109,83 @@ def main(
     if response.status_code == 200:
         result = response.json()
         logger.info("Server response: %s", result)
+
+        # Print redacted messages and extracted values
+        logger.info("\nProcessed Messages:")
+        for i, (message, redacted) in enumerate(
+            zip(messages, result["redacted_messages"])
+        ):
+            logger.info("\nMessage %d:", i)
+            logger.info("Original length: %d bytes", len(message))
+            logger.info("Redacted message:")
+            logger.info("%s", redacted)
+
+        logger.info("Extracted Values:")
+        for i, value in enumerate(result["extracted_values"]):
+            logger.info("Value %d: %s", i, value)
+
+        if result.get("record_ids"):
+            logger.info("\nStored in nilDB with record IDs: %s", result["record_ids"])
+        else:
+            logger.info("\nTest mode - values not stored in nilDB")
     else:
         logger.error("Error: %d", response.status_code)
         logger.error(response.text)
 
 
-if __name__ == "__main__":
-    import sys
+def get_example_data(
+    example_names: List[str],
+) -> Tuple[List[str], List[List[Dict[str, Any]]]]:
+    """Get example data and patterns for the specified examples.
 
-    # Parse command-line arguments
-    if len(sys.argv) < 2:
-        URL = "http://localhost:8000"
-    else:
-        URL = sys.argv[1]
+    Args:
+        example_names: List of example names to process
 
-    AMAZON_EXAMPLE = """
-    HTTP/2 200 OK
-    Content-Type: application/json
-    Content-Length: 256
-    Server: Server
-    Date: Fri, 07 Mar 2025 12:34:56 GMT
-    Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
-    Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://amazon.com
-    X-Frame-Options: DENY
-    X-Content-Type-Options: nosniff
-    X-XSS-Protection: 1; mode=block
-    Set-Cookie: session-id=145-9876543-1234567; Path=/; Secure; HttpOnly; SameSite=Strict
-    Set-Cookie: session-token=xyz123abc456def789ghi000; Path=/; Secure; HttpOnly; SameSite=Strict
-
-    {
-      "orderId": "112-3456789-0123456",
-      "status": "Confirmed",
-      "orderDate": "2025-03-07T12:34:56Z",
-      "totalAmount": {
-        "currency": "USD",
-        "value": "129.99"
-      },
-      "shipping": {
-        "method": "Standard Shipping",
-        "estimatedDelivery": "2025-03-10T18:00:00Z",
-        "address": {
-          "recipient": "John Doe",
-          "line1": "1234 Elm Street",
-          "line2": "Apt 567",
-          "city": "Seattle",
-          "state": "WA",
-          "postalCode": "98101",
-          "country": "US"
-        }
-      }
-    }
+    Returns:
+        Tuple of (messages, patterns)
     """
-    amazon_example_blocks_to_redact = [51, 62, 64, 65, 67, 68, 70, 72]
-    amazon_example_blocks_to_extract = [51]
+    messages = []
+    patterns = []
 
-    main(
-        [AMAZON_EXAMPLE],
-        [amazon_example_blocks_to_redact],
-        [amazon_example_blocks_to_extract],
-        URL
+    for name in example_names:
+        if name not in EXAMPLES:
+            raise ValueError(
+                f"Unknown example: {name}. Available examples: {list(EXAMPLES.keys())}"
+            )
+        message, pattern = EXAMPLES[name]
+        messages.append(message)
+        patterns.append(pattern)
+
+    return messages, patterns
+
+
+def main():
+    """Main function to parse arguments and run the client."""
+    parser = argparse.ArgumentParser(
+        description="Client for sending secure messages to the TEE server."
     )
+    parser.add_argument(
+        "--server-url",
+        default="http://localhost:8000",
+        help="URL of the server (default: http://localhost:8000)",
+    )
+    parser.add_argument(
+        "--examples",
+        nargs="+",
+        choices=list(EXAMPLES.keys()),
+        default=["amazon"],
+        help="Examples to run (default: amazon)",
+    )
+
+    args = parser.parse_args()
+
+    try:
+        messages, patterns = get_example_data(args.examples)
+        process_messages(messages, patterns, args.server_url)
+    except Exception as exc:
+        logger.error("Error running client: %s", str(exc))
+        raise
+
+
+if __name__ == "__main__":
+    main()

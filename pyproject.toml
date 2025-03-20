@@ -19,6 +19,7 @@ dependencies = [
     "requests>=2.31.0",
     "secretvaults==0.0.0a6",
     "gunicorn>=23.0.0",
+    "jsonpath-ng>=1.7.0",
 ]
 
 [project.urls]

@@ -28,26 +28,65 @@ def test_root_endpoint(client: TestClient):
     assert response.headers["location"] == "/docs"
 
 
-def test_process_secure_message(
-    client: TestClient,
-    key_manager: KeyManager,
-    sample_message: str,
-    sample_blocks_to_redact: list[int],
-    sample_blocks_to_extract: list[int],
-):
+def test_process_secure_message(client: TestClient, key_manager: KeyManager):
     """Test processing multiple secure messages."""
     key_manager.generate_keys()
     aes_key = AESGCM.generate_key(bit_length=256)
     aesgcm = AESGCM(aes_key)
 
-    # Create two records
+    # Create two records with different patterns
     records = []
     concatenated_ciphertexts = b""
 
-    for _ in range(2):  # Create two records
+    # First record: toy example
+    message1 = """
+    HTTP/1.1 200 OK
+    Content-Type: application/json
+    Content-Length: 60
+
+    {
+    "message": "JSON here. You're welcome.",
+    "value": 42,
+    "success": true
+    }
+    """
+    patterns1 = [
+        {
+            "pattern_type": "json",
+            "path": "$.value",
+            "data_type": "number",
+            "should_extract": True,
+        }
+    ]
+
+    # Second record: simple redaction
+    message2 = """
+    HTTP/1.1 200 OK
+    Content-Type: application/json
+    Content-Length: 60
+
+    {
+    "public": "visible data",
+    "sensitive": {
+        "field1": "secret1",
+        "field2": "secret2"
+    }
+    }
+    """
+    patterns2 = [
+        {
+            "pattern_type": "json",
+            "path": "$.sensitive",
+            "include_children": True,
+            "data_type": "string",
+        }
+    ]
+
+    # Process both records
+    for message, patterns in [(message1, patterns1), (message2, patterns2)]:
         nonce = os.urandom(12)
         aes_associated_data = os.urandom(12)
-        ciphertext = aesgcm.encrypt(nonce, sample_message.encode(), aes_associated_data)
+        ciphertext = aesgcm.encrypt(nonce, message.encode(), aes_associated_data)
         full_ciphertext = nonce + ciphertext
         concatenated_ciphertexts += full_ciphertext
 
@@ -55,8 +94,7 @@ def test_process_secure_message(
             {
                 "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
                 "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
-                "blocks_to_redact": sample_blocks_to_redact,
-                "blocks_to_extract": sample_blocks_to_extract,
+                "patterns": patterns,
             }
         )
 
@@ -74,98 +112,86 @@ def test_process_secure_message(
     # Send request
     response = client.post("/process-secure-message", json=payload)
     assert response.status_code == 200
-    assert response.json() == {"status": "success"}
+    result = response.json()
+    assert result["status"] == "success"
+    assert len(result["redacted_messages"]) == 2
+    assert len(result["extracted_values"]) == 1
+    assert result["extracted_values"][0] == 42
+    assert result["record_ids"] is None  # Test mode
 
 
-def test_invalid_signature(
-    client: TestClient, key_manager: KeyManager, sample_message: str
-):
+def test_invalid_signature(client: TestClient, key_manager: KeyManager):
     """Test handling of invalid signatures."""
-    # Generate keys
     key_manager.generate_keys()
-
-    # Generate AES key
     aes_key = AESGCM.generate_key(bit_length=256)
     aesgcm = AESGCM(aes_key)
 
-    # Create two records
-    records = []
-    concatenated_ciphertexts = b""
+    # Create a record
+    message = '{"value": 42}'
+    patterns = [{"pattern_type": "json", "path": "$.value"}]
 
-    for _ in range(2):  # Create two records
-        nonce = os.urandom(12)
-        aes_associated_data = os.urandom(12)
-        ciphertext = aesgcm.encrypt(nonce, sample_message.encode(), aes_associated_data)
-        full_ciphertext = nonce + ciphertext
-        concatenated_ciphertexts += full_ciphertext
+    nonce = os.urandom(12)
+    aes_associated_data = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, message.encode(), aes_associated_data)
+    full_ciphertext = nonce + ciphertext
 
-        records.append(
-            {
-                "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
-                "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
-                "blocks_to_redact": [1, 3],
-                "blocks_to_extract": [1],
-            }
-        )
+    records = [
+        {
+            "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
+            "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
+            "patterns": patterns,
+        }
+    ]
 
     # Create invalid signature
     invalid_signature = "invalid".encode() * 8  # 64 bytes of invalid data
 
-    # Prepare the request payload
+    # Prepare payload
     payload = {
         "aes_key": base64.b64encode(aes_key).decode(),
         "records": records,
         "ecdsa_signature": base64.b64encode(invalid_signature).decode(),
     }
 
-    # Send the request
+    # Send request
     response = client.post("/process-secure-message", json=payload)
     assert response.status_code == 400
     assert "Invalid signature" in response.json()["detail"]
 
 
-def test_invalid_block_indices(
-    client: TestClient, key_manager: KeyManager, sample_message: str
-):
-    """Test handling of invalid block indices."""
-    # Generate keys
+def test_invalid_pattern(client: TestClient, key_manager: KeyManager):
+    """Test handling of invalid pattern configuration."""
     key_manager.generate_keys()
-
-    # Generate AES key
     aes_key = AESGCM.generate_key(bit_length=256)
     aesgcm = AESGCM(aes_key)
 
-    # Create records with invalid block indices
-    records = []
-    concatenated_ciphertexts = b""
+    # Create a record with invalid pattern
+    message = '{"value": 42}'
+    patterns = [{"pattern_type": "invalid", "path": "$.value"}]  # Invalid pattern type
 
-    for _ in range(2):  # Create two records
-        nonce = os.urandom(12)
-        aes_associated_data = os.urandom(12)
-        ciphertext = aesgcm.encrypt(nonce, sample_message.encode(), aes_associated_data)
-        full_ciphertext = nonce + ciphertext
-        concatenated_ciphertexts += full_ciphertext
+    nonce = os.urandom(12)
+    aes_associated_data = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, message.encode(), aes_associated_data)
+    full_ciphertext = nonce + ciphertext
 
-        records.append(
-            {
-                "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
-                "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
-                "blocks_to_redact": [100],  # Invalid index
-                "blocks_to_extract": [],
-            }
-        )
+    records = [
+        {
+            "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
+            "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
+            "patterns": patterns,
+        }
+    ]
 
     # Sign concatenated ciphertexts
-    signature = key_manager.sign_data(concatenated_ciphertexts)
+    signature = key_manager.sign_data(full_ciphertext)
 
-    # Prepare the request payload
+    # Prepare payload
     payload = {
         "aes_key": base64.b64encode(aes_key).decode(),
         "records": records,
         "ecdsa_signature": base64.b64encode(signature).decode(),
     }
 
-    # Send the request
+    # Send request
     response = client.post("/process-secure-message", json=payload)
-    assert response.status_code == 400
-    assert "Invalid block indices" in response.json()["detail"]
+    assert response.status_code == 400  # Validation error
