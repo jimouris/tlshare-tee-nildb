@@ -13,46 +13,46 @@ We additionally provide a demo client that can be replaced by any zkTLS frontend
 
 ## API Specification
 
-The server accepts a payload with multiple records in the following format:
+The server accepts a payload in the following format:
 ```json5
 {
     // Base64 encoded AES-256 key used for encryption
     "aes_key": "base64_encoded_bytes",
 
-    // Array of records to process
-    "records": [
+    // Origin of the data (e.g., "amazon", "tiktok") - used for provenance
+    "origin": "amazon",
+
+    // Array of patterns for redaction and extraction
+    "patterns": [
+        {
+            // Type of pattern - must be "json"
+            "pattern_type": "json",
+
+            // JSONPath expression to locate the data (e.g., "$.total_amount")
+            "path": "$.total_amount",
+
+            // Type of data to extract - "string" or "number" (defaults to "number")
+            "data_type": "number",
+
+            // Whether to extract this value for nilDB storage
+            "should_extract": true,
+
+            // Whether to include nested fields in redaction
+            "include_children": false,
+
+            // Whether to preserve JSON keys during redaction
+            "preserve_keys": true
+        }
+    ],
+
+    // Array of TLS record fragments to process
+    "fragments": [
         {
             // Base64 encoded AES-GCM encrypted data (includes 12-byte nonce)
             "aes_ciphertext": "base64_encoded_bytes",
 
             // Base64 encoded associated data for AES-GCM
-            "aes_associated_data": "base64_encoded_bytes",
-
-            // Array of patterns for redaction and extraction
-            "patterns": [
-                {
-                    // Type of pattern - must be "json"
-                    "pattern_type": "json",
-
-                    // JSONPath expression to locate the data (e.g., "$.total_amount")
-                    "path": "$.total_amount",
-
-                    // Type of data to extract - "string" or "number" (defaults to "number")
-                    "data_type": "number",
-
-                    // Whether to extract this value for nilDB storage
-                    "should_extract": true,
-
-                    // Whether to include nested fields in redaction
-                    "include_children": false,
-
-                    // Whether to preserve JSON keys during redaction
-                    "preserve_keys": true,
-
-                    // Origin of the data (e.g., "amazon", "tiktok") - used for provenance
-                    "origin": "amazon"
-                }
-            ]
+            "aes_associated_data": "base64_encoded_bytes"
         }
     ],
 
@@ -72,8 +72,8 @@ A successful response will have this structure:
     // Always "success" for successful requests
     "status": "success",
 
-    // Array of redacted messages (sensitive parts replaced with ****)
-    "redacted_messages": ["redacted message content"],
+    // The redacted message (sensitive parts replaced with ****)
+    "redacted_message": "redacted message content",
 
     // Array of extracted values (only present if should_extract was true)
     "extracted_values": [123],
@@ -214,7 +214,7 @@ python -m src.client.client [OPTIONS]
 
 Available options:
 - `--server-url`: The URL of the server (default: http://localhost:8000)
-- `--examples`: One or more examples to run (default: amazon). Available examples: toy, amazon, tiktok
+- `--example`: The example to run (default: amazon). Available examples: toy, amazon, tiktok
 
 ### Example Usage
 
@@ -223,21 +223,24 @@ Available options:
    python -m src.client.client
    ```
 
-2. **Run specific example(s)**:
+2. **Run specific example**:
    ```shell
    # Run toy example
-   python -m src.client.client --examples toy
+   python -m src.client.client --example toy
 
-   # Run multiple examples
-   python -m src.client.client --examples toy amazon tiktok
+   # Run amazon example
+   python -m src.client.client --example amazon
+
+   # Run tiktok example
+   python -m src.client.client --example tiktok
    ```
 
 3. **Custom Server URL**:
    ```shell
-   python -m src.client.client --server-url http://example.com:8000 --examples toy
+   python -m src.client.client --server-url http://example.com:8000 --example toy
    ```
 
-The client will send secure messages to the specified server URL. Each example demonstrates different patterns:
+The client will send a secure message to the specified server URL. Each example demonstrates different patterns:
 
 - **Toy Example**: Simple example with a single value extraction
 - **Amazon Example**: Purchase response with total amount extraction and redaction of sensitive fields

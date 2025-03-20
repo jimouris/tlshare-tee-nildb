@@ -3,7 +3,7 @@
 import argparse
 import base64
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -40,25 +40,20 @@ def encrypt_message(message: str, key: bytes, associated_data: bytes) -> bytes:
     return nonce + ciphertext
 
 
-def process_messages(
-    messages: List[str],
-    patterns: List[List[Dict[str, Any]]],
+def process_message(
+    message: Union[str, List[str]],
+    patterns: List[Dict[str, Any]],
+    origin: str,
     server_url: str = "http://localhost:8000",
 ) -> None:
-    """Process and send messages to the server.
+    """Process and send a message to the server.
 
     Args:
-        messages: List of messages to send.
-        patterns: List of lists of patterns for redaction and extraction.
+        message: The message to send. Can be a string or list of strings for pre-split messages.
+        patterns: List of patterns for redaction and extraction.
+        origin: Origin of the data (e.g., "amazon", "tiktok").
         server_url: The URL of the server (default: http://localhost:8000).
     """
-    # Validate that all lists have the same length
-    if len(messages) != len(patterns):
-        raise ValueError(
-            f"Messages and patterns must have the same length. Got: messages={len(messages)}, "
-            f"patterns={len(patterns)}"
-        )
-
     # Initialize key manager
     key_manager = KeyManager()
 
@@ -74,30 +69,33 @@ def process_messages(
 
     # Generate a random AES key
     aes_key = generate_key()
+    fragments = []
 
-    # Process each message
-    records = []
-    concatenated_ciphertexts = b""
+    # Handle both string and list inputs
+    message_parts = message if isinstance(message, list) else [message]
+    logger.info("Processing message with %d fragments", len(message_parts))
 
-    for i, (message, message_patterns) in enumerate(zip(messages, patterns)):
+    # Process each fragment
+    for fragment in message_parts:
         aes_associated_data = os.urandom(12)
-        ciphertext = encrypt_message(message, aes_key, aes_associated_data)
-        concatenated_ciphertexts += ciphertext
-
-        record = {
+        ciphertext = encrypt_message(fragment, aes_key, aes_associated_data)
+        fragments.append({
             "aes_ciphertext": base64.b64encode(ciphertext).decode(),
             "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
-            "patterns": message_patterns,
-        }
-        records.append(record)
+        })
 
     # Sign the concatenated ciphertexts
+    concatenated_ciphertexts = b"".join(
+        base64.b64decode(f["aes_ciphertext"]) for f in fragments
+    )
     signature = key_manager.sign_data(concatenated_ciphertexts)
 
     # Prepare the request payload
     payload = {
         "aes_key": base64.b64encode(aes_key).decode(),
-        "records": records,
+        "origin": origin,
+        "patterns": patterns,
+        "fragments": fragments,
         "ecdsa_signature": base64.b64encode(signature).decode(),
     }
 
@@ -110,15 +108,13 @@ def process_messages(
         result = response.json()
         logger.info("Server response: %s", result)
 
-        # Print redacted messages and extracted values
-        logger.info("\nProcessed Messages:")
-        for i, (message, redacted) in enumerate(
-            zip(messages, result["redacted_messages"])
-        ):
-            logger.info("\nMessage %d:", i)
-            logger.info("Original length: %d bytes", len(message))
-            logger.info("Redacted message:")
-            logger.info("%s", redacted)
+        # Print redacted message and extracted values
+        logger.info("\nProcessed Message:")
+        total_length = sum(len(part) for part in message_parts)
+        logger.info("Original length: %d bytes", total_length)
+        logger.info("Number of fragments: %d", len(fragments))
+        logger.info("Redacted message:")
+        logger.info("%s", result["redacted_message"])
 
         logger.info("Extracted Values:")
         for i, value in enumerate(result["extracted_values"]):
@@ -133,30 +129,21 @@ def process_messages(
         logger.error(response.text)
 
 
-def get_example_data(
-    example_names: List[str],
-) -> Tuple[List[str], List[List[Dict[str, Any]]]]:
-    """Get example data and patterns for the specified examples.
+def get_example_data(example_name: str) -> Tuple[Union[str, List[str]], List[Dict[str, Any]], str]:
+    """Get example data and patterns for the specified example.
 
     Args:
-        example_names: List of example names to process
+        example_name: Name of the example to process
 
     Returns:
-        Tuple of (messages, patterns)
+        Tuple of (message, patterns, origin)
     """
-    messages = []
-    patterns = []
-
-    for name in example_names:
-        if name not in EXAMPLES:
-            raise ValueError(
-                f"Unknown example: {name}. Available examples: {list(EXAMPLES.keys())}"
-            )
-        message, pattern = EXAMPLES[name]
-        messages.append(message)
-        patterns.append(pattern)
-
-    return messages, patterns
+    if example_name not in EXAMPLES:
+        raise ValueError(
+            f"Unknown example: {example_name}. Available examples: {list(EXAMPLES.keys())}"
+        )
+    message, patterns = EXAMPLES[example_name]
+    return message, patterns, example_name
 
 
 def main():
@@ -170,18 +157,17 @@ def main():
         help="URL of the server (default: http://localhost:8000)",
     )
     parser.add_argument(
-        "--examples",
-        nargs="+",
+        "--example",
         choices=list(EXAMPLES.keys()),
-        default=["amazon"],
-        help="Examples to run (default: amazon)",
+        default="amazon",
+        help="Example to run (default: amazon)",
     )
 
     args = parser.parse_args()
 
     try:
-        messages, patterns = get_example_data(args.examples)
-        process_messages(messages, patterns, args.server_url)
+        message, patterns, origin = get_example_data(args.example)
+        process_message(message, patterns, origin, args.server_url)
     except Exception as exc:
         logger.error("Error running client: %s", str(exc))
         raise

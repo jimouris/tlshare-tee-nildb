@@ -50,9 +50,6 @@ class JsonPattern(BaseModel):
         False, description="Whether to include nested fields."
     )
     preserve_keys: bool = Field(True, description="Whether to preserve JSON keys.")
-    origin: str = Field(
-        "unknown", description="Origin of the data (e.g., amazon, tiktok)"
-    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -66,14 +63,11 @@ class JsonPattern(BaseModel):
 
 
 class Record(BaseModel):
-    """Model for a single record containing encrypted data and metadata."""
+    """Model for a single TLS record fragment."""
 
     aes_ciphertext: bytes = Field(..., description="Base64 encoded AES encrypted data")
     aes_associated_data: bytes = Field(
         ..., description="Base64 encoded AES associated data"
-    )
-    patterns: List[JsonPattern] = Field(
-        ..., description="List of patterns for redaction and extraction"
     )
 
     @field_validator("aes_ciphertext", "aes_associated_data", mode="before")
@@ -85,33 +79,6 @@ class Record(BaseModel):
         except (ValueError, TypeError) as exc:
             logger.error("Base64 decoding failed: %s", str(exc))
             raise ValueError("Invalid base64 encoding") from exc
-
-    @field_validator("patterns", mode="before")
-    @classmethod
-    def validate_patterns(cls, v: List[dict]) -> List[dict]:
-        """Validate patterns and convert validation errors to 400 status code."""
-        try:
-            # First validate that each pattern has a pattern_type
-            for pattern in v:
-                if not isinstance(pattern, dict):
-                    raise HTTPException(
-                        status_code=400, detail="Pattern must be a dictionary"
-                    )
-                if "pattern_type" not in pattern:
-                    raise HTTPException(
-                        status_code=400, detail="Pattern must have a pattern_type"
-                    )
-                if pattern["pattern_type"] != "json":
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid pattern type: {pattern['pattern_type']}. Must be 'json'.",
-                    )
-            return v
-        except HTTPException as exc:
-            # Re-raise HTTPException without wrapping
-            raise exc
-        except (ValueError, TypeError, KeyError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def extract_json_from_http_response(data: str) -> str:
@@ -267,12 +234,16 @@ def redact_message(
 
 
 class SecureMessage(BaseModel):
-    """Model for secure message containing multiple records."""
+    """Model for secure message containing TLS record fragments."""
 
     aes_key: bytes = Field(
         ..., description="Base64 encoded AES key used for encryption"
     )
-    records: List[Record] = Field(..., description="List of records to process")
+    origin: str = Field(
+        "unknown", description="Origin of the data (e.g., amazon, tiktok)"
+    )
+    patterns: List[JsonPattern] = Field(..., description="List of patterns for redaction and extraction")
+    fragments: List[Record] = Field(..., description="List of TLS record fragments")
     ecdsa_signature: bytes = Field(
         ..., description="Base64 encoded ECDSA signature for verification"
     )
@@ -340,16 +311,21 @@ def extract_data(text: str, rule: JsonPattern) -> str | int | None:
 
 @app.post("/process-secure-message")
 async def process_secure_message(message: SecureMessage):
-    """
-    Process a secure message containing AES ciphertext, key, ECDSA signature, and patterns.
+    """Process a secure message containing TLS record fragments.
 
     Args:
-        message: SecureMessage object containing encrypted data and metadata
+        message: SecureMessage object containing:
+            - aes_key: AES key used for encryption
+            - origin: Origin of the data (e.g., amazon, tiktok)
+            - patterns: List of patterns for redaction and extraction
+            - fragments: List of TLS record fragments
+            - ecdsa_signature: Signature over concatenated ciphertexts
+            - is_test: Whether this is a test request
 
     Returns:
         Dict containing:
         - status: "success" if processing is successful
-        - redacted_messages: List of redacted messages (sensitive parts replaced with ****)
+        - redacted_message: The redacted message (sensitive parts replaced with ****)
         - extracted_values: List of values extracted and stored in nilDB
         - record_ids: List of nilDB record IDs where values were stored (if not in test mode)
 
@@ -362,7 +338,7 @@ async def process_secure_message(message: SecureMessage):
     try:
         # Verify the signature over concatenated ciphertexts
         concatenated_ciphertexts = b"".join(
-            record.aes_ciphertext for record in message.records
+            fragment.aes_ciphertext for fragment in message.fragments
         )
         logger.info("Verifying signature [request_id: %s]", request_id)
         logger.info("- Data to verify length: %d bytes", len(concatenated_ciphertexts))
@@ -395,95 +371,69 @@ async def process_secure_message(message: SecureMessage):
             message, "is_test", False
         )  # Default to False if is_test is not provided
 
-        # Process each record
-        all_record_ids = []
-        all_redacted_messages = []
-        all_extracted_values = []
-
-        for i, record in enumerate(message.records):
-            logger.info("Processing record %d [request_id: %s]", i, request_id)
+        # Process each fragment and concatenate
+        all_plaintexts = []
+        for i, fragment in enumerate(message.fragments):
+            logger.info("Processing fragment %d [request_id: %s]", i, request_id)
 
             # Extract nonce and ciphertext
-            nonce = record.aes_ciphertext[:12]
-            ciphertext = record.aes_ciphertext[12:]
+            nonce = fragment.aes_ciphertext[:12]
+            ciphertext = fragment.aes_ciphertext[12:]
 
             try:
                 plaintext = aesgcm.decrypt(
-                    nonce, ciphertext, record.aes_associated_data
+                    nonce, ciphertext, fragment.aes_associated_data
                 )
                 logger.info(
-                    "Message successfully decrypted [request_id: %s]", request_id
+                    "Fragment successfully decrypted [request_id: %s]", request_id
                 )
+                all_plaintexts.append(plaintext)
             except InvalidTag as exc:
                 logger.error(
-                    "Decryption failed for record %d [request_id: %s]", i, request_id
+                    "Decryption failed for fragment %d [request_id: %s]", i, request_id
                 )
                 raise HTTPException(
-                    status_code=400, detail=f"Invalid ciphertext in record {i}"
+                    status_code=400, detail=f"Invalid ciphertext in fragment {i}"
                 ) from exc
 
-            # Apply patterns and get sensitive/non-sensitive parts
-            sensitive_part, non_sensitive_part, extracted_values = redact_message(
-                plaintext, record.patterns
-            )
+        # Concatenate all plaintexts
+        complete_plaintext = b"".join(all_plaintexts)
+        logger.info("All fragments concatenated [request_id: %s]", request_id)
 
-            logger.info("Message parts [request_id: %s]:", request_id)
-            logger.info("- Sensitive part length: %d bytes", len(sensitive_part))
-            logger.info(
-                "- Non-sensitive part length: %d bytes", len(non_sensitive_part)
-            )
-            logger.info("- Extracted values: %s", extracted_values)
+        # Apply patterns to the complete message
+        sensitive_part, non_sensitive_part, extracted_values = redact_message(
+            complete_plaintext, message.patterns
+        )
 
-            # Store the redacted message
-            try:
-                all_redacted_messages.append(non_sensitive_part.decode("utf-8"))
-                logger.info("Redacted message for record %d:", i)
-                logger.info(non_sensitive_part.decode("utf-8"))
-            except (UnicodeDecodeError, AttributeError) as exc:
-                logger.error("Error creating redacted message: %s", str(exc))
-                all_redacted_messages.append("<error creating redacted message>")
+        logger.info("Message parts [request_id: %s]:", request_id)
+        logger.info("- Sensitive part length: %d bytes", len(sensitive_part))
+        logger.info("- Non-sensitive part length: %d bytes", len(non_sensitive_part))
+        logger.info("- Extracted values: %s", extracted_values)
 
-            # Process and extract values - use the original plaintext for extraction
-            values_for_nildb = []
-            original_text = plaintext.decode("utf-8")
-            last_origin = "unknown"  # Default origin if no extractable pattern is found
-            for rule in record.patterns:
-                if rule.should_extract:
-                    extracted_value = extract_data(original_text, rule)
-                    if extracted_value is not None:  # Changed from if extracted_value to handle 0 values
-                        values_for_nildb.append(extracted_value)
-                        last_origin = rule.origin  # Store the origin from the last extractable pattern
+        # Store the redacted message
+        try:
+            redacted_message = non_sensitive_part.decode("utf-8")
+            logger.info("Redacted message:")
+            logger.info(redacted_message)
+        except (UnicodeDecodeError, AttributeError) as exc:
+            logger.error("Error creating redacted message: %s", str(exc))
+            redacted_message = "<error creating redacted message>"
 
-            all_extracted_values.extend(values_for_nildb)
-
-            # Validate extracted values
-            for value in values_for_nildb:
-                if not isinstance(value, (int, str)):
-                    raise ValueError(
-                        f"Value to store in nilDB must be an integer or string: {value}"
-                    )
-
-            # Store values in nildb if not a test
-            if not is_test:
-                logger.info("- Storing %s to nilDB.", values_for_nildb)
-                record_ids = []
-                for value in values_for_nildb:
-                    record_ids.extend(await upload_to_nildb(value, last_origin))
-                all_record_ids.extend(record_ids)
-                logger.info("- Stored values to nilDB with IDs %s", record_ids)
-            else:
-                logger.info("- Skipping nilDB storage (test mode).")
-
-        if not is_test:
-            logger.info("Stored all values to nilDB with IDs %s", all_record_ids)
+        # Store values in nildb if not a test
+        record_ids = []
+        if not is_test and extracted_values:
+            logger.info("- Storing %s to nilDB.", extracted_values)
+            for value in extracted_values:
+                record_ids.extend(await upload_to_nildb(value, message.origin))
+            logger.info("- Stored values to nilDB with IDs %s", record_ids)
         else:
-            logger.info("Skipping nilDB storage (test mode)")
+            logger.info("- Skipping nilDB storage (test mode or no values to store).")
 
         return {
             "status": "success",
-            "redacted_messages": all_redacted_messages,
-            "extracted_values": all_extracted_values,
-            "record_ids": all_record_ids if not is_test else None,
+            "redacted_message": redacted_message,
+            "extracted_values": extracted_values,
+            "record_ids": record_ids if not is_test else None,
         }
 
     except HTTPException:
