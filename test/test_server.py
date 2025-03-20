@@ -34,11 +34,11 @@ def test_process_secure_message(client: TestClient, key_manager: KeyManager):
     aes_key = AESGCM.generate_key(bit_length=256)
     aesgcm = AESGCM(aes_key)
 
-    # Create two records with different patterns
-    records = []
+    # Create two fragments with different patterns
+    fragments = []
     concatenated_ciphertexts = b""
 
-    # First record: toy example
+    # First fragment: toy example
     message1 = """
     HTTP/1.1 200 OK
     Content-Type: application/json
@@ -50,16 +50,8 @@ def test_process_secure_message(client: TestClient, key_manager: KeyManager):
     "success": true
     }
     """
-    patterns1 = [
-        {
-            "pattern_type": "json",
-            "path": "$.value",
-            "data_type": "number",
-            "should_extract": True,
-        }
-    ]
 
-    # Second record: simple redaction
+    # Second fragment: simple redaction
     message2 = """
     HTTP/1.1 200 OK
     Content-Type: application/json
@@ -73,30 +65,37 @@ def test_process_secure_message(client: TestClient, key_manager: KeyManager):
     }
     }
     """
-    patterns2 = [
-        {
-            "pattern_type": "json",
-            "path": "$.sensitive",
-            "include_children": True,
-            "data_type": "string",
-        }
-    ]
 
-    # Process both records
-    for message, patterns in [(message1, patterns1), (message2, patterns2)]:
+    # Process both fragments
+    for message in [message1, message2]:
         nonce = os.urandom(12)
         aes_associated_data = os.urandom(12)
         ciphertext = aesgcm.encrypt(nonce, message.encode(), aes_associated_data)
         full_ciphertext = nonce + ciphertext
         concatenated_ciphertexts += full_ciphertext
 
-        records.append(
+        fragments.append(
             {
                 "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
                 "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
-                "patterns": patterns,
             }
         )
+
+    # Define patterns for the entire message
+    patterns = [
+        {
+            "pattern_type": "json",
+            "path": "$.value",
+            "data_type": "number",
+            "should_extract": True,
+        },
+        {
+            "pattern_type": "json",
+            "path": "$.sensitive",
+            "include_children": True,
+            "data_type": "string",
+        },
+    ]
 
     # Sign concatenated ciphertexts
     signature = key_manager.sign_data(concatenated_ciphertexts)
@@ -104,7 +103,9 @@ def test_process_secure_message(client: TestClient, key_manager: KeyManager):
     # Prepare payload
     payload = {
         "aes_key": base64.b64encode(aes_key).decode(),
-        "records": records,
+        "origin": "test",
+        "patterns": patterns,
+        "fragments": fragments,
         "ecdsa_signature": base64.b64encode(signature).decode(),
         "is_test": True,
     }
@@ -114,9 +115,8 @@ def test_process_secure_message(client: TestClient, key_manager: KeyManager):
     assert response.status_code == 200
     result = response.json()
     assert result["status"] == "success"
-    assert len(result["redacted_messages"]) == 2
-    assert len(result["extracted_values"]) == 1
-    assert result["extracted_values"][0] == 42
+    assert "redacted_message" in result
+    assert result["extracted_values"] == [42]
     assert result["record_ids"] is None  # Test mode
 
 
@@ -126,7 +126,7 @@ def test_invalid_signature(client: TestClient, key_manager: KeyManager):
     aes_key = AESGCM.generate_key(bit_length=256)
     aesgcm = AESGCM(aes_key)
 
-    # Create a record
+    # Create a fragment
     message = '{"value": 42}'
     patterns = [{"pattern_type": "json", "path": "$.value"}]
 
@@ -135,22 +135,24 @@ def test_invalid_signature(client: TestClient, key_manager: KeyManager):
     ciphertext = aesgcm.encrypt(nonce, message.encode(), aes_associated_data)
     full_ciphertext = nonce + ciphertext
 
-    records = [
+    fragments = [
         {
             "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
             "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
-            "patterns": patterns,
         }
     ]
 
     # Create invalid signature
-    invalid_signature = "invalid".encode() * 8  # 64 bytes of invalid data
+    invalid_signature = os.urandom(64)  # Random invalid signature
 
     # Prepare payload
     payload = {
         "aes_key": base64.b64encode(aes_key).decode(),
-        "records": records,
+        "origin": "test",
+        "patterns": patterns,
+        "fragments": fragments,
         "ecdsa_signature": base64.b64encode(invalid_signature).decode(),
+        "is_test": True,
     }
 
     # Send request
@@ -165,7 +167,7 @@ def test_invalid_pattern(client: TestClient, key_manager: KeyManager):
     aes_key = AESGCM.generate_key(bit_length=256)
     aesgcm = AESGCM(aes_key)
 
-    # Create a record with invalid pattern
+    # Create a fragment with invalid pattern
     message = '{"value": 42}'
     patterns = [{"pattern_type": "invalid", "path": "$.value"}]  # Invalid pattern type
 
@@ -174,11 +176,10 @@ def test_invalid_pattern(client: TestClient, key_manager: KeyManager):
     ciphertext = aesgcm.encrypt(nonce, message.encode(), aes_associated_data)
     full_ciphertext = nonce + ciphertext
 
-    records = [
+    fragments = [
         {
             "aes_ciphertext": base64.b64encode(full_ciphertext).decode(),
             "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
-            "patterns": patterns,
         }
     ]
 
@@ -188,10 +189,13 @@ def test_invalid_pattern(client: TestClient, key_manager: KeyManager):
     # Prepare payload
     payload = {
         "aes_key": base64.b64encode(aes_key).decode(),
-        "records": records,
+        "origin": "test",
+        "patterns": patterns,
+        "fragments": fragments,
         "ecdsa_signature": base64.b64encode(signature).decode(),
+        "is_test": True,
     }
 
     # Send request
     response = client.post("/process-secure-message", json=payload)
-    assert response.status_code == 400  # Validation error
+    assert response.status_code == 422  # Validation error

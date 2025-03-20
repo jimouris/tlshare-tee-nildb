@@ -3,11 +3,8 @@
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.asymmetric.utils import (
-    decode_dss_signature, encode_dss_signature)
-from cryptography.hazmat.primitives.hashes import SHA256
 
 from .logging import logger
 
@@ -81,36 +78,43 @@ class KeyManager:
         return public_key
 
     def sign_data(self, data: bytes) -> bytes:
-        """Sign data using the private key.
+        """Sign data using ECDSA with SHA-256.
 
         Args:
             data: The data to sign
 
         Returns:
-            The signature as bytes
+            bytes: The signature
         """
+        # First compute SHA-256 hash of the data
+        hasher = hashes.Hash(hashes.SHA256())
+        hasher.update(data)
+        data_hash = hasher.finalize()
+
+        # Sign the hash with the private key
         private_key = self.load_private_key()
-        signature = private_key.sign(data, ec.ECDSA(SHA256()))
-        # Convert the signature to a fixed-length format
-        r, s = decode_dss_signature(signature)
-        return r.to_bytes(32, "big") + s.to_bytes(32, "big")
+        signature = private_key.sign(data_hash, ec.ECDSA(hashes.SHA256()))
+        return signature
 
     def verify_signature(self, data: bytes, signature: bytes) -> bool:
-        """Verify a signature using the public key.
+        """Verify an ECDSA signature.
 
         Args:
             data: The data that was signed
             signature: The signature to verify
 
         Returns:
-            True if the signature is valid, False otherwise
+            bool: True if signature is valid
         """
-        public_key = self.load_public_key()
         try:
-            # Convert the fixed-length signature back to the format expected by verify
-            r = int.from_bytes(signature[:32], "big")
-            s = int.from_bytes(signature[32:], "big")
-            public_key.verify(encode_dss_signature(r, s), data, ec.ECDSA(SHA256()))
+            # First compute SHA-256 hash of the data
+            hasher = hashes.Hash(hashes.SHA256())
+            hasher.update(data)
+            data_hash = hasher.finalize()
+
+            # Verify the signature of the hash
+            public_key = self.load_public_key()
+            public_key.verify(signature, data_hash, ec.ECDSA(hashes.SHA256()))
             logger.info("Signature verification successful")
             return True
         except InvalidSignature:

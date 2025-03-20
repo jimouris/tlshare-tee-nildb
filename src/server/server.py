@@ -242,7 +242,9 @@ class SecureMessage(BaseModel):
     origin: str = Field(
         "unknown", description="Origin of the data (e.g., amazon, tiktok)"
     )
-    patterns: List[JsonPattern] = Field(..., description="List of patterns for redaction and extraction")
+    patterns: List[JsonPattern] = Field(
+        ..., description="List of patterns for redaction and extraction"
+    )
     fragments: List[Record] = Field(..., description="List of TLS record fragments")
     ecdsa_signature: bytes = Field(
         ..., description="Base64 encoded ECDSA signature for verification"

@@ -79,10 +79,12 @@ def process_message(
     for fragment in message_parts:
         aes_associated_data = os.urandom(12)
         ciphertext = encrypt_message(fragment, aes_key, aes_associated_data)
-        fragments.append({
-            "aes_ciphertext": base64.b64encode(ciphertext).decode(),
-            "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
-        })
+        fragments.append(
+            {
+                "aes_ciphertext": base64.b64encode(ciphertext).decode(),
+                "aes_associated_data": base64.b64encode(aes_associated_data).decode(),
+            }
+        )
 
     # Sign the concatenated ciphertexts
     concatenated_ciphertexts = b"".join(
@@ -129,7 +131,9 @@ def process_message(
         logger.error(response.text)
 
 
-def get_example_data(example_name: str) -> Tuple[Union[str, List[str]], List[Dict[str, Any]], str]:
+def get_example_data(
+    example_name: str,
+) -> Tuple[Union[str, List[str]], List[Dict[str, Any]], str]:
     """Get example data and patterns for the specified example.
 
     Args:

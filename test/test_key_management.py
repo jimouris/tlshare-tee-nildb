@@ -51,7 +51,6 @@ def test_sign_and_verify(key_manager: KeyManager):
     # Sign the data
     signature = key_manager.sign_data(test_data)
     assert isinstance(signature, bytes)
-    assert len(signature) == 64  # 32 bytes for r + 32 bytes for s
 
     # Verify the signature
     assert key_manager.verify_signature(test_data, signature)

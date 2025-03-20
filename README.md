@@ -90,7 +90,13 @@ The API returns appropriate HTTP status codes:
 - `422`: For validation errors in the request payload
 - `500`: For internal server errors
 
-Note: The `ecdsa_signature` is computed over the concatenation of all `aes_ciphertext` values in the records array.
+### Security Details
+
+#### ECDSA Signature Process
+The `ecdsa_signature` is computed in two steps:
+1. First, a SHA-256 hash is computed over the concatenation of all `aes_ciphertext` values in the records array
+2. Then, the hash is signed using ECDSA with the private key
+
 
 ## Key Generation
 

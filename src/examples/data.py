@@ -16,7 +16,7 @@ toy_example_patterns = [
         "pattern_type": "json",
         "path": "$.value",
         "data_type": "number",
-        "should_extract": True
+        "should_extract": True,
     }
 ]
 
@@ -36,13 +36,9 @@ toy_string_example_patterns = [
         "pattern_type": "json",
         "path": "$.message",
         "data_type": "string",
-        "should_extract": True
+        "should_extract": True,
     },
-    {
-        "pattern_type": "json",
-        "path": "$.username",
-        "data_type": "string"
-    }
+    {"pattern_type": "json", "path": "$.username", "data_type": "string"},
 ]
 
 AMAZON_EXAMPLE = """HTTP/2 200 OK
@@ -88,31 +84,31 @@ amazon_example_patterns = [
         "pattern_type": "json",
         "path": "$.totalAmount.value",
         "data_type": "number",
-        "should_extract": True  # This value will be stored in nilDB
+        "should_extract": True,  # This value will be stored in nilDB
     },
     # Redact all totalAmount fields
     {
         "pattern_type": "json",
         "path": "$.totalAmount",
-        "include_children": True,  # Override default False since we want to redact all fields
+        "include_children": True,
         "data_type": "string",
-        "should_extract": False
+        "should_extract": False,
     },
     # Redact shipping info (no extraction)
     {
         "pattern_type": "json",
         "path": "$.shipping",
-        "include_children": True,  # Override default False since we want to redact all fields
+        "include_children": True,
         "data_type": "string",
-        "should_extract": False
+        "should_extract": False,
     },
     # Redact order details (no extraction)
     {
         "pattern_type": "json",
         "path": "$['orderId', 'orderDate']",
         "data_type": "string",
-        "should_extract": False
-    }
+        "should_extract": False,
+    },
 ]
 
 TIKTOK_EXAMPLE = """HTTP/1.1 200 OK
@@ -146,24 +142,17 @@ tiktok_example_patterns = [
         "pattern_type": "json",
         "path": "$.data.redeem_info.coins_balance",
         "data_type": "number",
-        "should_extract": True  # This value will be stored in nilDB
+        "should_extract": True,  # This value will be stored in nilDB
     },
     # Redact all redeem info (no extraction)
     {
         "pattern_type": "json",
         "path": "$.data.redeem_info",
         "data_type": "string",
+        "include_children": True,  # Override default False since we want to redact all fields
     },
-    {
-        "pattern_type": "json",
-        "path": "$.data.coins",
-        "data_type": "string",
-    },
-        {
-        "pattern_type": "json",
-        "path": "$.data.frozen_coins",
-        "data_type": "string",
-    }
+    {"pattern_type": "json", "path": "$.data.coins", "data_type": "number"},
+    {"pattern_type": "json", "path": "$.data.frozen_coins", "data_type": "number"},
 ]
 
 # Split TikTok example in the middle of coins_balance value
@@ -176,8 +165,7 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains
 Server-Timing: inner; dur=49
 
 {"data":{"block_coin_page":false,"coins":0,"frozen_coins":0,"has_google_recharge":false,"is_allow":true,"is_email_confirmed":false,"is_first_web_recharge":true,"is_periodic_payout":false,"is_show":true,"quick_payment_available":true,"redeem_info":{"coins_balance":1""",
-
-    """23,"frozen_coins_balance":0,"is_enabled":true,"is_first_recharge":true,"is_first_web_recharge":true,"is_region_enabled":false},"show_input_tooltip":true,"show_recharge_amount_adjusted_text":false,"verified_email":"","web_recharge_input_option":0},"extra":{"now":1742356099043},"status_code":0}"""
+    """23,"frozen_coins_balance":0,"is_enabled":true,"is_first_recharge":true,"is_first_web_recharge":true,"is_region_enabled":false},"show_input_tooltip":true,"show_recharge_amount_adjusted_text":false,"verified_email":"","web_recharge_input_option":0},"extra":{"now":1742356099043},"status_code":0}""",
 ]
 
 # Split TikTok example at redeem_info
@@ -190,8 +178,7 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains
 Server-Timing: inner; dur=49
 
 {"data":{"block_coin_page":false,"coins":0,"frozen_coins":0,"has_google_recharge":false,"is_allow":true,"is_email_confirmed":false,"is_first_web_recharge":true,"is_periodic_payout":false,"is_show":true,"quick_payment_available":true,"redeem_info":""",
-
-    """{"coins_balance":123,"frozen_coins_balance":0,"is_enabled":true,"is_first_recharge":true,"is_first_web_recharge":true,"is_region_enabled":false},"show_input_tooltip":true,"show_recharge_amount_adjusted_text":false,"verified_email":"","web_recharge_input_option":0},"extra":{"now":1742356099043},"status_code":0}"""
+    """{"coins_balance":123,"frozen_coins_balance":0,"is_enabled":true,"is_first_recharge":true,"is_first_web_recharge":true,"is_region_enabled":false},"show_input_tooltip":true,"show_recharge_amount_adjusted_text":false,"verified_email":"","web_recharge_input_option":0},"extra":{"now":1742356099043},"status_code":0}""",
 ]
 
 # Dictionary mapping example names to their data and patterns
@@ -201,5 +188,5 @@ EXAMPLES = {
     "amazon": (AMAZON_EXAMPLE, amazon_example_patterns),
     "tiktok": (TIKTOK_EXAMPLE, tiktok_example_patterns),
     "tiktok-split1": (TIKTOK_SPLIT1_EXAMPLE, tiktok_example_patterns),
-    "tiktok-split2": (TIKTOK_SPLIT2_EXAMPLE, tiktok_example_patterns)
+    "tiktok-split2": (TIKTOK_SPLIT2_EXAMPLE, tiktok_example_patterns),
 }
