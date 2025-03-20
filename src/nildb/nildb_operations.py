@@ -5,13 +5,20 @@ import asyncio
 import json
 import os
 import sys
+import uuid
 
+import nilql
 from secretvaults import OperationType, SecretVaultWrapper
 
 from src.nildb.org_config import org_config
 
 SCHEMA_ID = os.getenv("SCHEMA_ID")
 QUERY_ID = os.getenv("QUERY_ID")
+
+# Initialize encryption keys
+NUM_NODES = len(org_config["nodes"])
+SUM_KEY = nilql.ClusterKey.generate({"nodes": [{}] * NUM_NODES}, {"sum": True})
+STORE_KEY = nilql.ClusterKey.generate({"nodes": [{}] * NUM_NODES}, {"store": True})
 
 
 async def create_schema() -> str:
@@ -56,24 +63,33 @@ async def upload_to_nildb(data: str | int, origin: str) -> list[str]:
             org_config["nodes"],
             org_config["org_credentials"],
             SCHEMA_ID,
-            operation=OperationType.SUM,
         )
         await collection.init()
+        _id = str(uuid.uuid4())
 
         # Prepare data based on type
         if isinstance(data, int):
-            nildb_data = [{"number": {"%allot": data}, "description": origin}]
+            encrypted_data = nilql.encrypt(SUM_KEY, data)
+            nildb_data = [
+                {"number": {"%share": share}, "description": origin, "_id": _id}
+                for share in encrypted_data
+            ]
         else:
+            encrypted_number = nilql.encrypt(SUM_KEY, 0)
+            encrypted_string = nilql.encrypt(STORE_KEY, str(data))
             nildb_data = [
                 {
-                    "number": {"%allot": 0},  # Zero for string-only data
-                    "string": {"%allot": str(data)},
+                    "number": {"%share": num_share},
+                    "string": {"%share": str_share},
                     "description": origin,
+                    "_id": _id,
                 }
+                for num_share, str_share in zip(encrypted_number, encrypted_string)
             ]
+        print(f"🔑 Encrypted data: {nildb_data}")
 
         # Write data to nodes
-        data_written = await collection.write_to_nodes(nildb_data)
+        data_written = await collection.write_to_nodes([nildb_data], allot_data=False)
 
         # Extract unique created IDs from the results
         new_ids = list(
@@ -85,6 +101,74 @@ async def upload_to_nildb(data: str | int, origin: str) -> list[str]:
             }
         )
         return new_ids
+    except RuntimeError as error:
+        print(f"❌ Failed to use SecretVaultWrapper: {str(error)}")
+        sys.exit(1)
+
+
+async def download_from_nildb(origin: str = None) -> list[dict]:
+    """
+    Download and decrypt data from nilDB.
+
+    Args:
+        record_ids: List of record IDs to download
+
+    Returns:
+        List of decrypted data records
+    """
+    try:
+        # Initialize the SecretVaultWrapper instance with the org configuration and schema ID
+        collection = SecretVaultWrapper(
+            org_config["nodes"],
+            org_config["org_credentials"],
+            SCHEMA_ID,
+            operation=OperationType.SUM,
+        )
+        await collection.init()
+
+        # Read data from nodes
+        data_read = await collection.read_from_nodes(
+            {"description": origin} if origin else {}, unify_data=False
+        )
+
+        # Reconstruct and decrypt the data
+        decrypted_data = []
+        for record in data_read:
+            if record.get("shares"):
+                # Extract shares from the result
+                shares = record["shares"]
+
+                # Separate number and string shares
+                number_shares = [s["number"]["%share"] for s in shares]
+                string_shares = [
+                    s.get("string", {}).get("%share", None) for s in shares
+                ]
+
+                # Decrypt the data
+                if all(s is None for s in string_shares):
+                    # Number data
+                    decrypted_data.append(
+                        {
+                            "number": nilql.decrypt(SUM_KEY, number_shares),
+                            "description": shares[0]["description"],
+                            "_id": shares[0]["_id"],
+                        }
+                    )
+                else:
+                    # String data
+                    decrypted_data.append(
+                        {
+                            "number": nilql.decrypt(SUM_KEY, number_shares),
+                            "string": nilql.decrypt(STORE_KEY, string_shares),
+                            "description": shares[0]["description"],
+                            "_id": shares[0]["_id"],
+                        }
+                    )
+        print(
+            f"📚 Query Result for{' all' if origin is None else f' {origin}'} data:",
+            json.dumps(decrypted_data, indent=2),
+        )
+
     except RuntimeError as error:
         print(f"❌ Failed to use SecretVaultWrapper: {str(error)}")
         sys.exit(1)
@@ -130,7 +214,7 @@ async def execute_sum_query(origin: str = "*"):
         org = SecretVaultWrapper(
             org_config["nodes"],
             org_config["org_credentials"],
-            operation=OperationType.SUM,  # we'll be doing a sum operation on encrypted values
+            operation=OperationType.SUM,
         )
         await org.init()
 
@@ -163,6 +247,13 @@ def parse_args():
         metavar="ORIGIN",
         nargs="?",
         const="*",
+        help="Download raw data, optionally filtered by origin (e.g., 'amazon', 'tiktok', '*' for all)",
+    )
+    parser.add_argument(
+        "--query-sum",
+        metavar="ORIGIN",
+        nargs="?",
+        const="*",
         help="Execute sum query, optionally filtered by origin (e.g., 'amazon', 'tiktok', '*' for all)",
     )
 
@@ -173,8 +264,10 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
-    if not (args.create or args.query is not None):
-        print("Please specify an operation (--create or --query). Use -h for help.")
+    if not (args.create or args.query or args.query_sum is not None):
+        print(
+            "Please specify an operation (--create or --query or --query-sum). Use -h for help."
+        )
         sys.exit(1)
 
     if args.create:
@@ -187,11 +280,15 @@ if __name__ == "__main__":
         print(f"Query created! Don't forget to update {QUERY_ID} in your .env file!")
 
     if args.query is not None:
+        print(f"\nDownloading raw data for {args.query}...")
+        asyncio.run(download_from_nildb(args.query))
+
+    if args.query_sum is not None:
         if not QUERY_ID:
             print("❌ Error: QUERY_ID not found in environment variables")
             print("Please set QUERY_ID in your .env file")
             sys.exit(1)
-        print(f"\nExecuting sum query for {args.query}...")
-        asyncio.run(execute_sum_query(args.query))
+        print(f"\nExecuting sum query for {args.query_sum}...")
+        asyncio.run(execute_sum_query(args.query_sum))
 
     sys.exit(0)

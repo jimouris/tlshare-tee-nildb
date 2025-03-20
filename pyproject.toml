@@ -17,7 +17,7 @@ dependencies = [
     "pydantic>=2.6.0",
     "cryptography>=3.4",
     "requests>=2.31.0",
-    "secretvaults==0.0.0a6",
+    "secretvaults==0.0.0a7",
     "gunicorn>=23.0.0",
     "jsonpath-ng>=1.7.0",
 ]
